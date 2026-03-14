@@ -1,11 +1,11 @@
-from app.services.jira_service import JiraService
+from app.services.incident_service import IncidentService
 
 
 def main():
 
-    jira = JiraService()
+    incident_service = IncidentService()
 
-    response = jira.create_ticket(
+    response = incident_service.create_incident(
         summary="Test Incident from NOC Automation",
         description="This ticket was created from the automation platform"
     )
