@@ -15,7 +15,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     response = incident_service.create_incident(
-        summary="Test Incident from Telegram",
+        summary="Test Incident from Telegram v 0.5",
         description="This ticket was created from the Telegram bot"
     )
 
