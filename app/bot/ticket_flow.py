@@ -121,7 +121,14 @@ Detalle:
             description=description
         )
 
-        print("Jira response:", response)
+        if "key" not in response:
+            send_message(
+                user_id,
+                "❌ No se pudo crear el ticket. Intenta nuevamente o contacte al NOC."
+            )
+            print("Jira error response:", response)
+            conversation_manager.end(user_id)
+            return
 
         ticket_key = response["key"]
 
