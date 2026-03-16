@@ -116,9 +116,12 @@ Detalle:
 """
 
         response = incident_service.create_incident(
+            project_key=data["project_key"],
             summary=data["summary"],
             description=description
         )
+
+        print("Jira response:", response)
 
         ticket_key = response["key"]
 

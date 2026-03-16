@@ -11,10 +11,9 @@ class JiraService:
         self.base_url = os.getenv("JIRA_URL")
         self.email = os.getenv("JIRA_EMAIL")
         self.api_token = os.getenv("JIRA_API_TOKEN")
-        self.project_key = os.getenv("JIRA_PROJECT_KEY")
         self.issue_type = os.getenv("JIRA_ISSUE_TYPE")
 
-    def create_ticket(self, summary, description):
+    def create_ticket(self, project_key, summary, description):
 
         url = f"{self.base_url}/rest/api/3/issue"
 
@@ -28,7 +27,7 @@ class JiraService:
         payload = {
             "fields": {
                 "project": {
-                    "key": self.project_key
+                    "key": project_key
                 },
                 "summary": summary,
                 "description": {

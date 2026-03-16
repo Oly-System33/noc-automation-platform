@@ -26,7 +26,8 @@ def send_message(chat_id, text, keyboard=None):
 
     session.post(
         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-        json=payload
+        json=payload,
+        timeout=5
     )
 
 
