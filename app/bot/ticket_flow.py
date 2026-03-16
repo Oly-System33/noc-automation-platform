@@ -48,7 +48,14 @@ def handle_message(user_id, text, send_message):
     if state == "SELECT_PROJECT":
 
         if text not in PROJECTS:
-            send_message(user_id, "Selecciona un proyecto válido")
+
+            keyboard = [[p] for p in PROJECTS.keys()]
+
+            send_message(
+                user_id,
+                "Selecciona un proyecto válido",
+                keyboard
+            )
             return
 
         conversation_manager.update_data(user_id, "project_name", text)
@@ -66,6 +73,17 @@ def handle_message(user_id, text, send_message):
 
     elif state == "SELECT_CATEGORY":
 
+        if text not in CATEGORIES:
+
+            keyboard = [[c] for c in CATEGORIES]
+
+            send_message(
+                user_id,
+                "Selecciona una categoría válida",
+                keyboard
+            )
+            return
+
         conversation_manager.update_data(user_id, "category", text)
         conversation_manager.update_state(user_id, "WRITE_SUMMARY")
 
@@ -76,6 +94,14 @@ def handle_message(user_id, text, send_message):
 
     elif state == "WRITE_SUMMARY":
 
+        if not text.strip():
+
+            send_message(
+                user_id,
+                "El título no puede estar vacío. Describe brevemente el problema."
+            )
+            return
+
         conversation_manager.update_data(user_id, "summary", text)
         conversation_manager.update_state(user_id, "WRITE_DESCRIPTION")
 
@@ -85,6 +111,14 @@ def handle_message(user_id, text, send_message):
         )
 
     elif state == "WRITE_DESCRIPTION":
+
+        if not text.strip():
+
+            send_message(
+                user_id,
+                "El título no puede estar vacío. Describe brevemente el problema."
+            )
+            return
 
         conversation_manager.update_data(user_id, "description", text)
         conversation_manager.update_state(user_id, "SELECT_PRIORITY")
@@ -98,6 +132,17 @@ def handle_message(user_id, text, send_message):
         )
 
     elif state == "SELECT_PRIORITY":
+
+        if text not in PRIORITIES:
+
+            keyboard = [[p] for p in PRIORITIES]
+
+            send_message(
+                user_id,
+                "Selecciona una prioridad válida",
+                keyboard
+            )
+            return
 
         conversation_manager.update_data(user_id, "priority", text)
 
