@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
 from app.bot.ticket_flow import start_ticket, handle_message
+from app.services.conversation_manager import conversation_manager
 import requests
 import os
 
@@ -45,7 +46,8 @@ async def telegram_webhook(request: Request):
         start_ticket(chat_id, send_message)
 
     elif text == "/cancel":
-        send_message(chat_id, "Operación cancelada.")
+        conversation_manager.end(chat_id)
+        send_message(chat_id, "❌ Operación cancelada.")
 
     else:
         handle_message(chat_id, text, send_message)
