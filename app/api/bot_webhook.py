@@ -1,10 +1,10 @@
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, Request
 from app.bot.ticket_flow import start_ticket, handle_message
 from app.services.conversation_manager import conversation_manager
 import requests
 import os
 
-app = FastAPI()
+router = APIRouter()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
@@ -12,7 +12,6 @@ session = requests.Session()
 
 
 def send_message(chat_id, text, keyboard=None):
-
     payload = {
         "chat_id": chat_id,
         "text": text
@@ -32,7 +31,7 @@ def send_message(chat_id, text, keyboard=None):
     )
 
 
-@app.post("/webhook")
+@router.post("/bot/webhook")
 async def telegram_webhook(request: Request):
 
     data = await request.json()

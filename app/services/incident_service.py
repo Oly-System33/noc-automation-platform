@@ -1,4 +1,4 @@
-from app.services.jira_service import JiraService
+from app.integrations.jira import JiraService
 
 
 class IncidentService:
