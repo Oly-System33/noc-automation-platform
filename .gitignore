@@ -21,3 +21,6 @@ venv/
 
 # Embeddings
 data/embeddings/
+
+#runbooks
+data/runbooks/
