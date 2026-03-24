@@ -15,3 +15,7 @@ class IncidentService:
         )
 
         return response
+
+    def process_zabbix_event(self, event):
+        print("Evento recibido en IncidentService")
+        print(event)
