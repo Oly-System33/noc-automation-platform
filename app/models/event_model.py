@@ -10,6 +10,7 @@ class ZabbixEvent:
     status: int
     event_id: Optional[str] = None
     timestamp: Optional[str] = None
+    duration: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: dict):
@@ -20,4 +21,5 @@ class ZabbixEvent:
             status=data.get("status"),
             event_id=data.get("event_id"),
             timestamp=data.get("timestamp"),
+            duration=data.get("duration"),
         )

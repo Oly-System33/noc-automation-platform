@@ -1,6 +1,5 @@
-from datetime import datetime, timedelta
 from typing import Dict, Optional
-
+from datetime import timedelta
 from app.models.event_model import ZabbixEvent
 
 
@@ -16,26 +15,21 @@ class EventProcessor:
         self.active_events: Dict[str, ZabbixEvent] = {}
 
     def process(self, event: ZabbixEvent) -> Optional[dict]:
-        """
-        Procesa evento entrante desde Zabbix.
 
-        Retorna:
-            dict con datos del incidente si requiere acción
-            None si no hay acción necesaria
-        """
-
-        if not event.event_id:
+        if event.event_id is None:
             print("[WARNING] Evento sin event_id, ignorado")
             return None
 
-        if not event.timestamp:
+        if event.timestamp is None:
             print("[WARNING] Evento sin timestamp, ignorado")
             return None
 
-        if event.status == 1:
+        status = str(event.status)
+
+        if status in ("1", "PROBLEM"):
             return self._handle_problem(event)
 
-        elif event.status == 0:
+        elif status in ("0", "RECOVERY"):
             return self._handle_recovery(event)
 
         return None
@@ -57,7 +51,7 @@ class EventProcessor:
 
     def _handle_recovery(self, event: ZabbixEvent) -> Optional[dict]:
         """
-        Cierra incidente activo y calcula duración total.
+        Cierra incidente activo usando duración enviada por Zabbix.
         """
 
         problem_event = self.active_events.get(event.event_id)
@@ -66,10 +60,7 @@ class EventProcessor:
             print(f"[WARNING] RECOVERY sin PROBLEM previo: {event.event_id}")
             return None
 
-        duration = self._calculate_duration(
-            problem_event.timestamp,
-            event.timestamp
-        )
+        duration = event.duration or "unknown"
 
         print(
             f"[RECOVERY] {event.host} - duración total: {duration}"
@@ -82,22 +73,6 @@ class EventProcessor:
             "event": event,
             "duration": duration,
         }
-
-    def _calculate_duration(self, start: str, end: str) -> timedelta:
-        """
-        Calcula duración entre timestamps HH:MM:SS
-        Maneja cruce de medianoche automáticamente.
-        """
-
-        fmt = "%H:%M:%S"
-
-        start_dt = datetime.strptime(start, fmt)
-        end_dt = datetime.strptime(end, fmt)
-
-        if end_dt < start_dt:
-            end_dt += timedelta(days=1)
-
-        return end_dt - start_dt
 
 
 # instancia global compartida entre requests
