@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import pandas as pd
 
 
@@ -76,9 +77,10 @@ class RuleLoader:
 
         suppressions_df = data["suppressions"]
 
-        now = datetime.now()
+        now = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires"))
+
         current_day = now.strftime("%A").lower()
-        current_time = now.strftime("%H:%M")
+        current_time = now.time()
 
         for _, row in suppressions_df.iterrows():
 
@@ -95,6 +97,13 @@ class RuleLoader:
 
             start = row["start"]
             end = row["end"]
+
+            # Convertir start/end si vienen como string
+            if isinstance(start, str):
+                start = datetime.strptime(start, "%H:%M:%S").time()
+
+            if isinstance(end, str):
+                end = datetime.strptime(end, "%H:%M:%S").time()
 
             if start <= current_time <= end:
                 return True
@@ -113,7 +122,15 @@ class RuleLoader:
         ]
 
         if not specific.empty:
-            return specific.iloc[0].to_dict()
+
+            action_row = specific.iloc[0].to_dict()
+
+            action_row["action"] = [
+                a.strip()
+                for a in action_row["action"].split(",")
+            ]
+
+            return action_row
 
         wildcard = actions_df[
             (actions_df["host"] == host)
@@ -121,7 +138,15 @@ class RuleLoader:
         ]
 
         if not wildcard.empty:
-            return wildcard.iloc[0].to_dict()
+
+            action_row = wildcard.iloc[0].to_dict()
+
+            action_row["action"] = [
+                a.strip()
+                for a in action_row["action"].split(",")
+            ]
+
+            return action_row
 
         return None
 
