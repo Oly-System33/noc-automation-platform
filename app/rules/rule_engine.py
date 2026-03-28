@@ -1,7 +1,11 @@
 from app.rules.rule_loader import rule_loader
+from app.services.action_dispatcher import ActionDispatcher
 
 
 class RuleEngine:
+
+    def __init__(self):
+        self.dispatcher = ActionDispatcher()
 
     def evaluate_problem(self, event):
 
@@ -14,8 +18,12 @@ class RuleEngine:
         if not rule_loader.is_host_monitored(client, host):
 
             print("[INFO] Host no monitoreado")
-            print("[ACTION] Mail enviado al cliente")
-            print("[ACTION] Equipo notificado")
+
+            self.dispatcher.dispatch(
+                event=event,
+                actions=["email"],
+                contacts=["cliente_default@empresa.com"]
+            )
 
             return
 
@@ -35,7 +43,11 @@ class RuleEngine:
             return
 
         # 5) enviar mail baseline (siempre)
-        print("[ACTION] Mail enviado al cliente")
+        self.dispatcher.dispatch(
+            event=event,
+            actions=["email"],
+            contacts=["cliente_default@empresa.com"]
+        )
 
         # 6) buscar acción adicional
         action = rule_loader.get_action(
@@ -61,9 +73,12 @@ class RuleEngine:
 
             return
 
-        # 8) ejecutar acción (simulada)
-        print(f"[ACTION] Ejecutar {action['action']} hacia {team}")
-        print(f"[CONTACT INFO] {contact}")
+        # 8) ejecutar acción adicional
+        self.dispatcher.dispatch(
+            event=event,
+            actions=action["action"],
+            contacts=[contact]
+        )
 
     def close_incident(self, event, duration):
 
