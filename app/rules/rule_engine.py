@@ -6,8 +6,15 @@ class RuleEngine:
 
     def __init__(self):
         self.dispatcher = ActionDispatcher()
+        self.processed_events = set()
 
     def evaluate_problem(self, event):
+
+        if event.event_id in self.processed_events:
+            print(f"[RULE_ENGINE] Event {event.event_id} already processed")
+            return
+
+        self.processed_events.add(event.event_id)
 
         # 1) separar cliente y host
         client, host = rule_loader.extract_client_and_host(event.host)
