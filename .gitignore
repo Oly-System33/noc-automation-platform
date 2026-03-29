@@ -23,4 +23,6 @@ venv/
 data/embeddings/
 
 #runbooks
-data/runbooks/
+data/runbooks/*
+!data/runbooks/runbook_template.xlsx
+!data/runbooks/README.md
