@@ -12,7 +12,7 @@ class RuleEngine:
 
         if event.event_id in self.processed_events:
             print(f"[RULE_ENGINE] Event {event.event_id} already processed")
-            return
+            return None
 
         self.processed_events.add(event.event_id)
 
@@ -32,7 +32,7 @@ class RuleEngine:
                 contacts=["cliente_default@empresa.com"]
             )
 
-            return
+            return None
 
         # 3) clasificar trigger
         trigger_group = rule_loader.get_trigger_group(
@@ -47,9 +47,9 @@ class RuleEngine:
 
             print("[INFO] Evento suprimido por regla horaria")
 
-            return
+            return None
 
-        # 5) enviar mail baseline (siempre)
+        # 5) enviar mail baseline
         self.dispatcher.dispatch(
             event=event,
             actions=["email"],
@@ -67,7 +67,7 @@ class RuleEngine:
 
             print("[INFO] No hay acción adicional definida")
 
-            return
+            return None
 
         team = action["target"]
 
@@ -78,7 +78,7 @@ class RuleEngine:
 
             print("[WARNING] No se encontró contacto para el equipo")
 
-            return
+            return None
 
         # 8) ejecutar acción adicional
         self.dispatcher.dispatch(
@@ -86,6 +86,9 @@ class RuleEngine:
             actions=action["action"],
             contacts=[contact]
         )
+
+        # 9) devolver mensaje operativo para PIRU
+        return action.get("mensaje")
 
     def close_incident(self, event, duration):
 
