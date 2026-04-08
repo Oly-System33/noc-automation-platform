@@ -105,8 +105,15 @@ class RuleLoader:
             if isinstance(end, str):
                 end = datetime.strptime(end, "%H:%M:%S").time()
 
-            if start <= current_time <= end:
-                return True
+            # ventana normal (ej: 09:00 → 18:00)
+            if start <= end:
+                if start <= current_time <= end:
+                    return True
+
+            # ventana overnight (ej: 22:00 → 02:00)
+            else:
+                if current_time >= start or current_time <= end:
+                    return True
 
         return False
 
