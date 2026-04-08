@@ -5,11 +5,15 @@ from typing import List, Dict
 class PiruClient:
 
     def __init__(self, base_url: str, token: str):
-        self.base_url = base_url.rstrip("/")
-        self.headers = {
+
+        self.base_url = base_url
+
+        self.session = requests.Session()
+
+        self.session.headers.update({
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
-        }
+        })
 
     def get_active_alerts(self) -> List[Dict]:
         """
@@ -18,7 +22,8 @@ class PiruClient:
 
         url = f"{self.base_url}/api/Alertas/Search?EstadoID=0"
 
-        response = requests.get(url, headers=self.headers)
+        response = self.session.get(url)
+
         response.raise_for_status()
 
         payload = response.json()
@@ -32,32 +37,28 @@ class PiruClient:
 
         url = f"{self.base_url}/api/Alertas/{alert_id}/ack"
 
-        response = requests.put(
-            url,
-            headers=self.headers,
-            json={"id": alert_id}
-        )
+        response = self.session.put(url)
 
         response.raise_for_status()
 
-    def add_action(self, alert_id: int, message: str) -> None:
-        """
-        Registra acción externa (comentario operativo)
-        """
+    def add_action(self, alert_id: int, message: str):
 
         url = f"{self.base_url}/api/Acciones/Externa"
 
         body = {
             "alertaID": alert_id,
             "descripcion": message,
+            "tiempo": 5,
+            "origen": 0,
+            "fueraDeHora": True,
             "justificativoSla": None,
-            "slaOk": "true"
+            "slaOk": True
         }
 
-        response = requests.post(
-            url,
-            json=body,
-            headers=self.headers
-        )
+        print("[PIRU ACTION PAYLOAD]:", body)
+
+        response = self.session.post(url, json=body)
 
         response.raise_for_status()
+
+        print(f"[PIRU] Acción registrada correctamente para alerta {alert_id}")

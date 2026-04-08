@@ -38,27 +38,38 @@ class PiruWatcher:
                     # adaptar alerta PIRU → ZabbixEvent
                     event = adapt_piru_alert(alert)
 
-                    # pasar por correlador interno (igual que Zabbix webhook)
+                    # pasar por correlador interno
                     result = processor.process(event)
 
                     if result and result["type"] == "PROBLEM":
 
                         print(
-                            f"[PIRU] Evaluando reglas para evento {alert_id}")
+                            f"[PIRU] Evaluando reglas para evento {alert_id}"
+                        )
 
-                        mensaje = rule_engine.evaluate_problem(result["event"])
+                        mensaje = rule_engine.evaluate_problem(
+                            result["event"]
+                        )
 
+                        print("MENSAJE RUNBOOK:", mensaje)
+
+                        # si hay mensaje → acción externa (cierra alerta)
                         if mensaje:
+
                             self.client.add_action(alert_id, mensaje)
 
-                    # ACK automático en PIRU
-                    print(f"[PIRU] ACK alerta {alert_id}")
-                    self.client.ack_alert(alert_id)
+                        # si no hay mensaje → solo ACK
+                        else:
+
+                            print(f"[PIRU] ACK alerta {alert_id}")
+
+                            self.client.ack_alert(alert_id)
 
                     # marcar como procesada
                     self.processed_alerts.add(alert_id)
 
             except Exception as e:
+
                 print(f"[ERROR][PIRU WATCHER] {e}")
 
             time.sleep(self.interval)
