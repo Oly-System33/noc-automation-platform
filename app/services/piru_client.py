@@ -37,9 +37,28 @@ class PiruClient:
 
         url = f"{self.base_url}/api/Alertas/{alert_id}/ack"
 
-        response = self.session.put(url)
+        body = {
+            "id": alert_id
+        }
 
-        response.raise_for_status()
+        response = self.session.put(url, json=body)
+
+        if response.status_code == 204:
+
+            print(f"[PIRU] ACK exitoso alerta {alert_id}")
+
+        elif response.status_code == 400:
+
+            print(
+                f"[PIRU] ACK ignorado (ya estaba confirmado) alerta {alert_id}"
+            )
+
+        else:
+
+            print(
+                f"[PIRU] ACK error inesperado {response.status_code}: "
+                f"{response.text}"
+            )
 
     def add_action(self, alert_id: int, message: str):
 

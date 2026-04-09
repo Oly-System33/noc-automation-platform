@@ -38,7 +38,7 @@ class PiruWatcher:
                     # adaptar alerta PIRU → ZabbixEvent
                     event = adapt_piru_alert(alert)
 
-                    # pasar por correlador interno
+                    # correlación interna
                     result = processor.process(event)
 
                     if result and result["type"] == "PROBLEM":
@@ -53,17 +53,26 @@ class PiruWatcher:
 
                         print("MENSAJE RUNBOOK:", mensaje)
 
-                        # si hay mensaje → acción externa (cierra alerta)
+                        # si hay mensaje → acción externa
                         if mensaje:
 
                             self.client.add_action(alert_id, mensaje)
 
-                        # si no hay mensaje → solo ACK
+                        # si no hay mensaje → ACK automático
                         else:
 
                             print(f"[PIRU] ACK alerta {alert_id}")
 
                             self.client.ack_alert(alert_id)
+
+                    else:
+
+                        # fallback de seguridad: ACK igual
+                        print(
+                            f"[PIRU] ACK fallback alerta {alert_id}"
+                        )
+
+                        self.client.ack_alert(alert_id)
 
                     # marcar como procesada
                     self.processed_alerts.add(alert_id)
