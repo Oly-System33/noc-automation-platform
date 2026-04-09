@@ -1,15 +1,11 @@
 services:
-
-  noc-bot:
-
+  piru-watcher:
     build: .
+    container_name: piru-watcher
 
-    container_name: noc_automation_bot
+    stdin_open: true
+    tty: true
 
-    ports:
-      - "8000:8000"
-
-    env_file:
-      - .env
-
-    restart: unless-stopped
+    volumes:
+      - ./piru_storage.json:/app/piru_storage.json
+      - ./data/runbooks:/app/data/runbooks

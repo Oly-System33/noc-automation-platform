@@ -26,3 +26,4 @@ data/embeddings/
 data/runbooks/*
 !data/runbooks/runbook_template.xlsx
 !data/runbooks/README.md
+piru_storage.json
