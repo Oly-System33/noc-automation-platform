@@ -99,7 +99,14 @@ class PiruClient:
 
         url = f"{self.base_url}/api/Alertas/{alert_id}/ack"
 
-        response = self.session.put(url)
+        payload = {
+            "id": alert_id
+        }
+
+        response = self.session.put(
+            url,
+            json=payload
+        )
 
         if response.status_code == 204:
 
