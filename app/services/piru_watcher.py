@@ -8,77 +8,64 @@ from app.rules.rule_engine import rule_engine
 
 class PiruWatcher:
 
-    def __init__(self, base_url: str, token: str, interval: int = 5):
-        self.client = PiruClient(base_url, token)
+    def __init__(self, base_url: str, interval: int = 5):
+        self.client = PiruClient(base_url)
         self.interval = interval
         self.processed_alerts = set()
 
     def run(self):
 
-        print("Piru watcher iniciado...")
+        print("Piru watcher iniciado... (Ctrl+C para salir)")
 
-        while True:
+        try:
 
-            try:
+            while True:
 
-                alerts = self.client.get_active_alerts()
+                try:
 
-                print(f"Alertas detectadas: {len(alerts)}")
+                    alerts = self.client.get_active_alerts()
 
-                for alert in alerts:
+                    print(f"Alertas detectadas: {len(alerts)}")
 
-                    alert_id = alert["id"]
+                    for alert in alerts:
 
-                    # deduplicación
-                    if alert_id in self.processed_alerts:
-                        continue
+                        alert_id = alert["id"]
 
-                    print(f"[PIRU] Nueva alerta detectada: {alert_id}")
+                        if alert_id in self.processed_alerts:
+                            continue
 
-                    # adaptar alerta PIRU → ZabbixEvent
-                    event = adapt_piru_alert(alert)
+                        print(f"[PIRU] Nueva alerta detectada: {alert_id}")
 
-                    # correlación interna
-                    result = processor.process(event)
+                        event = adapt_piru_alert(alert)
 
-                    if result and result["type"] == "PROBLEM":
+                        result = processor.process(event)
 
-                        print(
-                            f"[PIRU] Evaluando reglas para evento {alert_id}"
-                        )
+                        if result and result["type"] == "PROBLEM":
 
-                        mensaje = rule_engine.evaluate_problem(
-                            result["event"]
-                        )
+                            mensaje = rule_engine.evaluate_problem(
+                                result["event"]
+                            )
 
-                        print("MENSAJE RUNBOOK:", mensaje)
+                            if mensaje:
 
-                        # si hay mensaje → acción externa
-                        if mensaje:
+                                self.client.add_action(alert_id, mensaje)
 
-                            self.client.add_action(alert_id, mensaje)
+                            else:
 
-                        # si no hay mensaje → ACK automático
+                                self.client.ack_alert(alert_id)
+
                         else:
-
-                            print(f"[PIRU] ACK alerta {alert_id}")
 
                             self.client.ack_alert(alert_id)
 
-                    else:
+                        self.processed_alerts.add(alert_id)
 
-                        # fallback de seguridad: ACK igual
-                        print(
-                            f"[PIRU] ACK fallback alerta {alert_id}"
-                        )
+                except Exception as e:
 
-                        self.client.ack_alert(alert_id)
+                    print(f"[ERROR][PIRU WATCHER] {e}")
 
-                    # marcar como procesada
-                    self.processed_alerts.add(alert_id)
+                time.sleep(self.interval)
 
-            except Exception as e:
+        except KeyboardInterrupt:
 
-                print(f"[ERROR][PIRU WATCHER] {e}")
-
-            time.sleep(self.interval)
+            print("\n[PIRU] Watcher detenido correctamente.\n")
