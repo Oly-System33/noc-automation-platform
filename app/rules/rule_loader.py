@@ -44,7 +44,7 @@ class RuleLoader:
 
         client, host = full_host.split("/", 1)
 
-        return client, host
+        return client.strip(), host.strip()
 
     def is_host_monitored(self, client: str, host: str):
 
