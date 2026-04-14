@@ -34,6 +34,7 @@ class RuleLoader:
             "contacts": pd.read_excel(file_path, sheet_name="contacts"),
             "suppressions": pd.read_excel(file_path, sheet_name="suppressions"),
             "trigger_groups": pd.read_excel(file_path, sheet_name="trigger_groups"),
+            "severity_map": pd.read_excel(file_path, sheet_name="severity_map"),
         }
 
         self.cache[client] = data
@@ -169,6 +170,23 @@ class RuleLoader:
             return None
 
         return match.iloc[0].to_dict()
+
+    def get_jira_priority(self, client, severity):
+
+        data = self._load_client_runbook(client)
+
+        severity_df = data["severity_map"]
+
+        severity_lower = str(severity).lower()
+
+        match = severity_df[
+            severity_df["zabbix_severity"].str.lower() == severity_lower
+        ]
+
+        if match.empty:
+            return "Medium"
+
+        return match.iloc[0]["jira_priority"]
 
 
 rule_loader = RuleLoader()
