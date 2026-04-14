@@ -75,10 +75,11 @@ class RuleEngine:
         contact = rule_loader.get_contact(client, team)
 
         if not contact:
-
             print("[WARNING] No se encontró contacto para el equipo")
-
             return
+
+        # inyectar jira_project dentro del contacto dinámicamente
+        contact["jira_project"] = action.get("jira_project")
 
         # 8) ejecutar acción adicional
         self.dispatcher.dispatch(

@@ -1,5 +1,9 @@
 import requests
 import os
+import smtplib
+from email.mime.text import MIMEText
+from app.services.incident_service import IncidentService
+from app.rules.rule_loader import rule_loader
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_NOC")
 
@@ -8,6 +12,8 @@ class ActionDispatcher:
 
     def __init__(self):
 
+        self.incident_service = IncidentService()
+
         self.ACTION_MAP = {
             "email": self._action_email,
             "telegram": self._action_telegram,
@@ -15,6 +21,11 @@ class ActionDispatcher:
             "jira": self._action_jira,
             "teams": self._action_teams,
         }
+
+        self.smtp_server = "smtp.office365.com"
+        self.smtp_port = 587
+        self.smtp_user = "sebastian.gomez@cedi.com.ar"
+        self.smtp_password = "APP_PASSWORD"
 
     def _normalize_status(self, status):
 
@@ -66,20 +77,45 @@ class ActionDispatcher:
     def _action_email(self, event, contact):
 
         if isinstance(contact, str):
-            email = contact
+            recipient = contact
         else:
-            email = contact.get("email")
+            recipient = contact.get("email")
 
-        if not email:
+        if not recipient:
             print("[WARNING] No email defined for contact")
             return
 
-        print(
-            f"[DISPATCH][EMAIL] → {email} | "
-            f"{event.host} | "
-            f"{event.trigger} | "
-            f"{event.status}"
+        status = self._normalize_status(event.status)
+
+        subject = f"[NOC ALERT] {event.host} - {status}"
+
+        body = (
+            f"Host: {event.host}\n"
+            f"Trigger: {event.trigger}\n"
+            f"Severity: {event.severity}\n"
+            f"Status: {status}\n"
+            f"Event ID: {event.event_id}"
         )
+
+        msg = MIMEText(body)
+        msg["Subject"] = subject
+        msg["From"] = self.smtp_user
+        msg["To"] = recipient
+
+        try:
+
+            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+
+                server.starttls()
+                server.login(self.smtp_user, self.smtp_password)
+                server.send_message(msg)
+
+        except Exception as e:
+
+            print(f"[ERROR] Email send failed: {e}")
+            return
+
+        print(f"[DISPATCH][EMAIL] → {recipient}")
 
     def _action_telegram(self, event, contact):
 
@@ -142,18 +178,44 @@ class ActionDispatcher:
 
     def _action_jira(self, event, contact):
 
-        jira = contact.get("jira")
+        project_key = contact.get("jira_project")
 
-        if not jira:
-            print("[WARNING] No jira contact defined")
+        if not project_key:
+            print("[WARNING] No jira_project defined")
             return
 
-        print(
-            f"[DISPATCH][JIRA] → {jira} | "
-            f"{event.host} | "
-            f"{event.trigger} | "
-            f"{event.status}"
+        client, host = rule_loader.extract_client_and_host(event.host)
+
+        status = "PROBLEM" if str(event.status) == "1" else "RECOVERY"
+
+        jira_priority = rule_loader.get_jira_priority(
+            client,
+            event.severity
         )
+
+        print(f"[DEBUG] Creating Jira ticket in project: {project_key}")
+        print(f"[DEBUG] Jira priority resolved: {jira_priority}")
+
+        summary = f"{event.trigger} - {host}"
+
+        description = (
+            "Alerta detectada automáticamente por NOC Automation Engine\n\n"
+            f"Cliente: {client}\n"
+            f"Host: {host}\n"
+            f"Trigger: {event.trigger}\n"
+            f"Severity: {event.severity}\n"
+            f"Status: {status}\n"
+            f"Event ID: {event.event_id}\n"
+        )
+
+        response = self.incident_service.create_incident(
+            project_key=project_key,
+            summary=summary,
+            description=description,
+            priority=jira_priority
+        )
+
+        print(f"[DISPATCH][JIRA] Ticket creado: {response}")
 
     def _action_teams(self, event, contact):
 
