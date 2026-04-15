@@ -6,13 +6,15 @@ class IncidentService:
     def __init__(self):
         self.jira_service = JiraService()
 
-    def create_incident(self, project_key: str, summary: str, description: str, priority: str):
+    def create_incident(self, project_key: str, summary: str, description: str, priority: str, issue_type: str = None, request_type: str = None):
 
         response = self.jira_service.create_ticket(
             project_key=project_key,
             summary=summary,
             description=description,
-            priority=priority
+            priority=priority,
+            issue_type=issue_type,
+            request_type=request_type
         )
 
         return response

@@ -92,19 +92,30 @@ class RuleEngine:
 
         target_contact = rule_loader.get_contact(client, team)
 
-        # inyectar jira_project desde hoja actions
-        if target_contact and "jira_project" in action:
-            target_contact["jira_project"] = action["jira_project"]
+        # inyectar jira_project, jira_issue_type, jira_request_type desde hoja actions
+        if target_contact:
+
+            if "jira_project" in action:
+                target_contact["jira_project"] = action["jira_project"]
+
+            if "jira_issue_type" in action:
+                target_contact["jira_issue_type"] = action["jira_issue_type"]
+
+            if "jira_request_type" in action:
+                target_contact["jira_request_type"] = action["jira_request_type"]
 
         email_recipients = []
 
-        # baseline siempre entra
-        if baseline_contact and baseline_contact.get("email"):
-            email_recipients.append(baseline_contact.get("email"))
+        baseline_email = baseline_contact.get(
+            "email") if baseline_contact else None
+        target_email = target_contact.get("email") if target_contact else None
 
-        # contactos adicionales si existen
-        if target_contact and target_contact.get("email"):
-            email_recipients.append(target_contact.get("email"))
+        # limpiar NaN provenientes de pandas
+        if baseline_email and baseline_email == baseline_email:
+            email_recipients.append(str(baseline_email))
+
+        if target_email and target_email == target_email:
+            email_recipients.append(str(target_email))
 
         # dispatch EMAIL consolidado
         if email_recipients:

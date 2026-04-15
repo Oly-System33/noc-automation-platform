@@ -226,11 +226,23 @@ class ActionDispatcher:
             f"Event ID: {event.event_id}\n"
         )
 
+        issue_type = contact.get("jira_issue_type")
+        request_type = contact.get("jira_request_type")
+
+        # limpiar NaN provenientes de pandas
+        if issue_type != issue_type:
+            issue_type = None
+
+        if request_type != request_type:
+            request_type = None
+
         response = self.incident_service.create_incident(
             project_key=project_key,
             summary=summary,
             description=description,
-            priority=jira_priority
+            priority=jira_priority,
+            issue_type=issue_type,
+            request_type=request_type
         )
 
         print(f"[DISPATCH][JIRA] Ticket creado: {response}")

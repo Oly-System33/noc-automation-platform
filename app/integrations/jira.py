@@ -13,7 +13,7 @@ class JiraService:
         self.api_token = os.getenv("JIRA_API_TOKEN")
         self.issue_type = os.getenv("JIRA_ISSUE_TYPE")
 
-    def create_ticket(self, project_key, summary, description, priority):
+    def create_ticket(self, project_key, summary, description, priority, issue_type=None, request_type=None):
 
         url = f"{self.base_url}/rest/api/3/issue"
 
@@ -43,10 +43,13 @@ class JiraService:
                         }
                     ]
                 },
-                "issuetype": {"name": self.issue_type},
+                "issuetype": {"name": issue_type},
                 "priority": {"name": priority}
             }
         }
+
+        if request_type:
+            payload["fields"]["requestType"] = request_type
 
         response = requests.post(url, json=payload, headers=headers, auth=auth)
 
