@@ -26,11 +26,21 @@ class RuleEngine:
 
             print("[INFO] Host no monitoreado")
 
-            self.dispatcher.dispatch(
-                event=event,
-                actions=["email"],
-                contacts=["cliente_default@empresa.com"]
-            )
+            event.unmanaged_host = True
+
+            baseline_contact = rule_loader.get_contact(client, "baseline")
+
+            if baseline_contact and baseline_contact.get("email"):
+
+                self.dispatcher.dispatch(
+                    event=event,
+                    actions=["email"],
+                    contacts=[baseline_contact.get("email")]
+                )
+
+            else:
+
+                print("[WARNING] No baseline contact definido")
 
             return
 
@@ -49,14 +59,7 @@ class RuleEngine:
 
             return
 
-        # 5) enviar mail baseline (siempre)
-        self.dispatcher.dispatch(
-            event=event,
-            actions=["email"],
-            contacts=["cliente_default@empresa.com"]
-        )
-
-        # 6) buscar acción adicional
+        # 5) buscar acción adicional
         action = rule_loader.get_action(
             client,
             host,
@@ -67,26 +70,66 @@ class RuleEngine:
 
             print("[INFO] No hay acción adicional definida")
 
+            baseline_contact = rule_loader.get_contact(client, "baseline")
+
+            if baseline_contact and baseline_contact.get("email"):
+
+                self.dispatcher.dispatch(
+                    event=event,
+                    actions=["email"],
+                    contacts=[baseline_contact.get("email")]
+                )
+
+            else:
+
+                print("[WARNING] No baseline contact definido")
+
             return
 
         team = action["target"]
 
-        # 7) buscar contacto
-        contact = rule_loader.get_contact(client, team)
+        baseline_contact = rule_loader.get_contact(client, "baseline")
 
-        if not contact:
-            print("[WARNING] No se encontró contacto para el equipo")
-            return
+        target_contact = rule_loader.get_contact(client, team)
 
-        # inyectar jira_project dentro del contacto dinámicamente
-        contact["jira_project"] = action.get("jira_project")
+        # inyectar jira_project desde hoja actions
+        if target_contact and "jira_project" in action:
+            target_contact["jira_project"] = action["jira_project"]
 
-        # 8) ejecutar acción adicional
-        self.dispatcher.dispatch(
-            event=event,
-            actions=action["action"],
-            contacts=[contact]
-        )
+        email_recipients = []
+
+        # baseline siempre entra
+        if baseline_contact and baseline_contact.get("email"):
+            email_recipients.append(baseline_contact.get("email"))
+
+        # contactos adicionales si existen
+        if target_contact and target_contact.get("email"):
+            email_recipients.append(target_contact.get("email"))
+
+        # dispatch EMAIL consolidado
+        if email_recipients:
+
+            merged_recipients = ";".join(email_recipients)
+
+            self.dispatcher.dispatch(
+                event=event,
+                actions=["email"],
+                contacts=[merged_recipients]
+            )
+
+        # ejecutar otras acciones no-email normalmente
+        other_actions = [
+            a for a in action["action"]
+            if a != "email"
+        ]
+
+        if other_actions and target_contact:
+
+            self.dispatcher.dispatch(
+                event=event,
+                actions=other_actions,
+                contacts=[target_contact]
+            )
 
     def close_incident(self, event, duration):
 

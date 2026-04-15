@@ -4,6 +4,7 @@ import smtplib
 from email.mime.text import MIMEText
 from app.services.incident_service import IncidentService
 from app.rules.rule_loader import rule_loader
+from dotenv import load_dotenv
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_NOC")
 
@@ -22,10 +23,12 @@ class ActionDispatcher:
             "teams": self._action_teams,
         }
 
-        self.smtp_server = "smtp.office365.com"
-        self.smtp_port = 587
-        self.smtp_user = "sebastian.gomez@cedi.com.ar"
-        self.smtp_password = "APP_PASSWORD"
+        load_dotenv()
+
+        self.smtp_server = os.getenv("SMTP_SERVER")
+        self.smtp_port = int(os.getenv("SMTP_PORT", 587))
+        self.smtp_user = os.getenv("SMTP_USER")
+        self.smtp_password = os.getenv("SMTP_PASSWORD")
 
     def _normalize_status(self, status):
 
@@ -85,6 +88,9 @@ class ActionDispatcher:
             print("[WARNING] No email defined for contact")
             return
 
+        # soporta múltiples destinatarios separados por ;
+        recipients = [r.strip() for r in recipient.split(";") if r.strip()]
+
         status = self._normalize_status(event.status)
 
         subject = f"[NOC ALERT] {event.host} - {status}"
@@ -97,10 +103,19 @@ class ActionDispatcher:
             f"Event ID: {event.event_id}"
         )
 
+        if getattr(event, "unmanaged_host", False):
+
+            body += (
+                "\n\n"
+                "Este host no se encuentra registrado en el runbook del cliente.\n"
+                "Si corresponde su monitoreo, por favor solicitar su incorporación.\n"
+                "Ante dudas o consultas comunicarse con el equipo NOC."
+            )
+
         msg = MIMEText(body)
         msg["Subject"] = subject
         msg["From"] = self.smtp_user
-        msg["To"] = recipient
+        msg["To"] = ", ".join(recipients)
 
         try:
 
@@ -108,14 +123,19 @@ class ActionDispatcher:
 
                 server.starttls()
                 server.login(self.smtp_user, self.smtp_password)
-                server.send_message(msg)
+
+                server.sendmail(
+                    self.smtp_user,
+                    recipients,
+                    msg.as_string()
+                )
 
         except Exception as e:
 
             print(f"[ERROR] Email send failed: {e}")
             return
 
-        print(f"[DISPATCH][EMAIL] → {recipient}")
+        print(f"[DISPATCH][EMAIL] → {recipients}")
 
     def _action_telegram(self, event, contact):
 
@@ -126,8 +146,6 @@ class ActionDispatcher:
             return
 
         status = self._normalize_status(event.status)
-
-        icon = "🚨" if status == "PROBLEM" else "✅"
 
         message = (
             f"🚨 ALERTA NOC\n"
@@ -219,15 +237,13 @@ class ActionDispatcher:
 
     def _action_teams(self, event, contact):
 
-        teams = contact.get("teams")
+        teams_destination = contact.get("teams")
 
-        if not teams:
-            print("[WARNING] No teams webhook defined")
+        if not teams_destination:
+            print("[WARNING] No teams destination defined")
             return
 
-        print(
-            f"[DISPATCH][TEAMS] → {teams} | "
-            f"{event.host} | "
-            f"{event.trigger} | "
-            f"{event.status}"
-        )
+        print(f"[DISPATCH][TEAMS→EMAIL] → {teams_destination}")
+
+        # reutiliza el transporte SMTP existente
+        self._action_email(event, teams_destination)
