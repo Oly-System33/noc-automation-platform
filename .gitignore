@@ -8,6 +8,7 @@ venv/
 
 # Environment variables
 .env
+*.key
 
 # Logs
 *.log
@@ -26,3 +27,4 @@ data/embeddings/
 data/runbooks/*
 !data/runbooks/runbook_template.xlsx
 !data/runbooks/README.md
+private.key

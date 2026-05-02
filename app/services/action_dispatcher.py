@@ -3,6 +3,7 @@ import os
 import smtplib
 from email.mime.text import MIMEText
 from app.services.incident_service import IncidentService
+from app.services.call_service import call_service
 from app.rules.rule_loader import rule_loader
 from dotenv import load_dotenv
 
@@ -14,6 +15,7 @@ class ActionDispatcher:
     def __init__(self):
 
         self.incident_service = IncidentService()
+        self.call_service = call_service
 
         self.ACTION_MAP = {
             "email": self._action_email,
@@ -36,6 +38,20 @@ class ActionDispatcher:
             "1": "PROBLEM",
             "0": "RECOVERY"
         }.get(str(status), str(status))
+
+    def _normalize_phone_number(self, phone):
+
+        if isinstance(phone, float) and phone.is_integer():
+            phone = int(phone)
+
+        phone = str(phone).strip()
+
+        if phone.endswith(".0"):
+            phone = phone[:-2]
+
+        phone = phone.replace(" ", "").replace("-", "")
+
+        return phone.replace("+", "")
 
     def dispatch(self, event, actions: list, contacts: list):
 
@@ -183,15 +199,24 @@ class ActionDispatcher:
 
         phone = contact.get("phone")
 
-        if not phone:
+        if not phone or phone != phone:
             print("[WARNING] No phone defined for contact")
             return
 
+        phone = self._normalize_phone_number(phone)
+
+        try:
+            result = self.call_service.notify_event_by_call(event, phone)
+
+        except Exception as e:
+            print(f"[ERROR] Vonage call failed: {e}")
+            return
+
         print(
-            f"[DISPATCH][CALL] → {phone} | "
-            f"{event.host} | "
-            f"{event.trigger} | "
-            f"{event.status}"
+            "[DISPATCH][CALL] Vonage call created → "
+            f"phone={phone} | "
+            f"uuid={result.get('uuid')} | "
+            f"status={result.get('status')}"
         )
 
     def _action_jira(self, event, contact):
