@@ -1,5 +1,5 @@
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, time
 from zoneinfo import ZoneInfo
 import pandas as pd
 
@@ -36,6 +36,11 @@ class RuleLoader:
             "trigger_groups": pd.read_excel(file_path, sheet_name="trigger_groups"),
             "severity_map": pd.read_excel(file_path, sheet_name="severity_map"),
         }
+
+        try:
+            data["oncall"] = pd.read_excel(file_path, sheet_name="oncall")
+        except ValueError:
+            data["oncall"] = None
 
         self.cache[client] = data
 
@@ -170,6 +175,110 @@ class RuleLoader:
             return None
 
         return match.iloc[0].to_dict()
+
+    def get_oncall_contact(self, client, team):
+
+        data = self._load_client_runbook(client)
+
+        oncall_df = data.get("oncall")
+
+        if oncall_df is None or oncall_df.empty:
+            return None
+
+        required_columns = {
+            "team",
+            "start_date",
+            "end_date",
+            "start_time",
+            "end_time",
+        }
+
+        if "day" in oncall_df.columns and not required_columns.issubset(oncall_df.columns):
+            print("[ONCALL] legacy day-based format detected")
+            return None
+
+        if not required_columns.issubset(oncall_df.columns):
+            return None
+
+        now = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires"))
+        current_date = now.date()
+        current_time = now.time()
+
+        priorities = [team, "*"]
+
+        for team_match in priorities:
+
+            matches = oncall_df[
+                (oncall_df["team"].astype(str).str.strip() == team_match)
+            ]
+
+            for _, row in matches.iterrows():
+
+                start_date = self._parse_date(row.get("start_date"))
+                end_date = self._parse_date(row.get("end_date"))
+                start_time = self._parse_time(row.get("start_time"))
+                end_time = self._parse_time(row.get("end_time"))
+
+                if not start_date or not end_date or not start_time or not end_time:
+                    continue
+
+                if not start_date <= current_date <= end_date:
+                    continue
+
+                if self._is_time_active(current_time, start_time, end_time):
+                    return {
+                        "team": row.get("team"),
+                        "user": row.get("user"),
+                        "phone": row.get("phone"),
+                        "email": row.get("email"),
+                        "telegram": row.get("telegram"),
+                        "teams": row.get("teams"),
+                    }
+
+        return None
+
+    def _parse_date(self, value):
+
+        if pd.isna(value):
+            return None
+
+        if isinstance(value, datetime):
+            return value.date()
+
+        value = str(value).strip()
+
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+    def _parse_time(self, value):
+
+        if pd.isna(value):
+            return None
+
+        if isinstance(value, time):
+            return value
+
+        if isinstance(value, datetime):
+            return value.time()
+
+        value = str(value).strip()
+
+        for time_format in ("%H:%M:%S", "%H:%M"):
+            try:
+                return datetime.strptime(value, time_format).time()
+            except ValueError:
+                continue
+
+        return None
+
+    def _is_time_active(self, current_time, start, end):
+
+        if start <= end:
+            return start <= current_time <= end
+
+        return current_time >= start or current_time <= end
 
     def get_jira_priority(self, client, severity):
 

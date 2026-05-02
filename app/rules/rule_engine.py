@@ -90,7 +90,10 @@ class RuleEngine:
 
         baseline_contact = rule_loader.get_contact(client, "baseline")
 
-        target_contact = rule_loader.get_contact(client, team)
+        target_contact = rule_loader.get_oncall_contact(client, team)
+
+        if not target_contact:
+            target_contact = rule_loader.get_contact(client, team)
 
         # inyectar jira_project, jira_issue_type, jira_request_type desde hoja actions
         if target_contact:
