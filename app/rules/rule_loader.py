@@ -1,10 +1,11 @@
+import os
 from pathlib import Path
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 import pandas as pd
 
 
-RUNBOOKS_PATH = Path("data/runbooks")
+RUNBOOKS_PATH = Path(os.getenv("RUNBOOKS_PATH", "data/runbooks"))
 
 
 class RuleLoader:

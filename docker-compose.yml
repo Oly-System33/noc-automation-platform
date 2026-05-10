@@ -1,15 +1,14 @@
 services:
-
   noc-bot:
-
     build: .
-
     container_name: noc_automation_bot
-
     ports:
       - "8000:8000"
-
     env_file:
       - .env
-
+    environment:
+      RUNBOOKS_PATH: /app/runbooks
+    volumes:
+      - ./runbooks:/app/runbooks
+      - ./private.key:/app/private.key:ro
     restart: unless-stopped
