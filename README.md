@@ -32,7 +32,6 @@ Create `/opt/noc-engine/.env` from `.env.example` and set at least:
 ```text
 PUBLIC_BASE_URL=http://3.89.189.230:8000
 RUNBOOKS_PATH=/app/runbooks
-TELEGRAM_BOT_TOKEN_JIRA=replace-me
 TELEGRAM_BOT_TOKEN_NOC=replace-me
 VONAGE_APPLICATION_ID=replace-me
 VONAGE_PRIVATE_KEY_PATH=/app/private.key

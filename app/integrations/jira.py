@@ -11,7 +11,7 @@ class JiraService:
         self.base_url = os.getenv("JIRA_URL")
         self.email = os.getenv("JIRA_EMAIL")
         self.api_token = os.getenv("JIRA_API_TOKEN")
-        self.issue_type = os.getenv("JIRA_ISSUE_TYPE")
+        self.issue_type = os.getenv("JIRA_ISSUE_TYPE", "Task")
 
     def create_ticket(self, project_key, summary, description, priority, issue_type=None, request_type=None):
 
@@ -43,7 +43,7 @@ class JiraService:
                         }
                     ]
                 },
-                "issuetype": {"name": issue_type},
+                "issuetype": {"name": issue_type or self.issue_type},
                 "priority": {"name": priority}
             }
         }

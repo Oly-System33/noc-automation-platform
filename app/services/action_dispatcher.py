@@ -7,8 +7,6 @@ from app.services.call_service import call_service
 from app.rules.rule_loader import rule_loader
 from dotenv import load_dotenv
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_NOC")
-
 
 class ActionDispatcher:
 
@@ -27,6 +25,7 @@ class ActionDispatcher:
 
         load_dotenv()
 
+        self.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN_NOC")
         self.smtp_server = os.getenv("SMTP_SERVER")
         self.smtp_port = int(os.getenv("SMTP_PORT", 587))
         self.smtp_user = os.getenv("SMTP_USER")
@@ -171,7 +170,11 @@ class ActionDispatcher:
             f"Status: {status}"
         )
 
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        if not self.telegram_bot_token:
+            print("[WARNING] No TELEGRAM_BOT_TOKEN_NOC defined")
+            return
+
+        url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
 
         try:
 
