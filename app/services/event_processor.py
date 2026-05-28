@@ -1,5 +1,4 @@
 from typing import Dict, Optional
-from datetime import timedelta
 from app.models.event_model import ZabbixEvent
 
 

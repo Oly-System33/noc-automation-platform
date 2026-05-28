@@ -24,7 +24,7 @@ Zabbix webhook
 → ActionDispatcher
 → channel handlers: email, telegram, teams, jira, calls
 
-The "calls" action currently exists as a placeholder in ActionDispatcher and must be implemented using Twilio Voice.
+The "calls" action is implemented using Vonage Voice.
 
 This is an automation project for NOC incident handling.
 
@@ -50,7 +50,7 @@ Do not rename existing files, classes, methods, folders, or public interfaces un
 
 Do not change the existing RuleEngine flow unless strictly necessary.
 
-Do not change Jira, Email, Telegram, Teams, Zabbix, or Excel parsing logic except where required to wire the Twilio calls action.
+Do not change Jira, Email, Telegram, Teams, Zabbix, Vonage, or Excel parsing logic except where explicitly required.
 
 Do not modify the runbook structure.
 
@@ -72,7 +72,7 @@ Make the smallest safe production-grade change.
 
 ## Implementation goal
 
-Implement real Twilio Voice calls for the existing "calls" action.
+Maintain real Vonage Voice calls for the existing "calls" action.
 
 Current expected behavior:
 
@@ -80,7 +80,7 @@ When the RuleEngine dispatches action "calls", ActionDispatcher._action_calls(ev
 
 1. Resolve the phone number from contact["phone"].
 2. Build a voice alert message from the event.
-3. Trigger an outbound Twilio call to that phone.
+3. Trigger an outbound Vonage call to that phone.
 4. The call must play the alert message.
 5. The call must offer IVR:
    - Press 1 to confirm receipt.
@@ -90,27 +90,19 @@ When the RuleEngine dispatches action "calls", ActionDispatcher._action_calls(ev
 
 Use these environment variables:
 
-TWILIO_ACCOUNT_SID
-TWILIO_AUTH_TOKEN
-TWILIO_FROM_NUMBER
+VONAGE_APPLICATION_ID
+VONAGE_PRIVATE_KEY_PATH
+VONAGE_FROM_NUMBER
+VONAGE_API_BASE_URL
 PUBLIC_BASE_URL
 
 Do not hardcode secrets.
 
-Do not use TWILIO_TEST_PHONE_NUMBER in the real project integration.
-
 The called phone number must come from the runbook contact.
 
-PUBLIC_BASE_URL must be the public HTTPS URL used by Twilio to reach FastAPI callbacks.
+PUBLIC_BASE_URL must be the public URL used by Vonage to reach FastAPI callbacks.
 
 ## Dependencies
-
-Use the official Twilio Python SDK.
-
-If missing, install only:
-
-twilio
-python-multipart
 
 Do not modify unrelated dependencies.
 
@@ -120,31 +112,22 @@ If requirements.txt exists, update it only as needed.
 
 Add new files only if needed:
 
-app/integrations/twilio_voice.py
+app/integrations/vonage_voice.py
 app/services/call_service.py
-app/api/twilio_webhook.py
+app/api/vonage_webhook.py
 
 Modify existing files only if needed:
 
 app/main.py
 app/services/action_dispatcher.py
 
-## Twilio requirements
-
-Use TwiML with:
-
-VoiceResponse
-Gather
-Redirect
+## Vonage requirements
 
 Required endpoints:
 
-GET or POST /twilio/voice
-POST /twilio/ivr
-
-/twilio/voice must return application/xml.
-
-/twilio/ivr must receive Digits from form data.
+GET /vonage/answer
+POST /vonage/input
+POST /vonage/event
 
 Store active call events in memory for now, keyed by event_id.
 
