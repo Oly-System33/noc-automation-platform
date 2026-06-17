@@ -59,7 +59,35 @@ class RuleLoader:
 
         hosts_df = data["hosts"]
 
-        return host in hosts_df["host"].values
+        host = self._clean_value(host)
+
+        for _, row in hosts_df.iterrows():
+
+            if self._clean_value(row.get("host")) == host:
+
+                return True
+
+        return False
+
+    def get_host_group(self, client: str, host: str):
+
+        data = self._load_client_runbook(client)
+
+        hosts_df = data["hosts"]
+
+        if "host_group" not in hosts_df.columns:
+
+            return None
+
+        host = self._clean_value(host)
+
+        for _, row in hosts_df.iterrows():
+
+            if self._clean_value(row.get("host")) == host:
+
+                return self._clean_value(row.get("host_group"))
+
+        return None
 
     def get_trigger_group(self, client: str, trigger: str):
 
@@ -130,39 +158,89 @@ class RuleLoader:
 
         actions_df = data["actions"]
 
-        specific = actions_df[
-            (actions_df["host"] == host)
-            & (actions_df["trigger_group"] == trigger_group)
+        host = self._clean_value(host)
+        trigger_group = self._clean_value(trigger_group)
+        host_group = self.get_host_group(client, host)
+
+        priorities = [
+            ("host", host, trigger_group),
+            ("host", host, "*"),
         ]
 
-        if not specific.empty:
+        if host_group:
 
-            action_row = specific.iloc[0].to_dict()
+            priorities.extend([
+                ("group", host_group, trigger_group),
+                ("group", host_group, "*"),
+            ])
 
-            action_row["action"] = [
-                a.strip()
-                for a in action_row["action"].split(",")
-            ]
+        priorities.extend([
+            ("all", "*", trigger_group),
+            ("all", "*", "*"),
+        ])
 
-            return action_row
+        for scope_type, scope_value, trigger_match in priorities:
 
-        wildcard = actions_df[
-            (actions_df["host"] == host)
-            & (actions_df["trigger_group"] == "*")
-        ]
+            for _, row in actions_df.iterrows():
 
-        if not wildcard.empty:
+                if self._action_row_matches(
+                    row,
+                    scope_type,
+                    scope_value,
+                    trigger_match,
+                ):
 
-            action_row = wildcard.iloc[0].to_dict()
-
-            action_row["action"] = [
-                a.strip()
-                for a in action_row["action"].split(",")
-            ]
-
-            return action_row
+                    return self._format_action_row(row)
 
         return None
+
+    def _action_row_matches(self, row, scope_type, scope_value, trigger_group):
+
+        row_scope_type, row_scope_value = self._get_action_scope(row)
+
+        return (
+            row_scope_type == scope_type
+            and row_scope_value == scope_value
+            and self._clean_value(row.get("trigger_group")) == trigger_group
+        )
+
+    def _get_action_scope(self, row):
+
+        has_new_scope = (
+            "scope_type" in row.index
+            and "scope_value" in row.index
+            and self._clean_value(row.get("scope_type"))
+            and self._clean_value(row.get("scope_value"))
+        )
+
+        if has_new_scope:
+
+            return (
+                self._clean_value(row.get("scope_type")).lower(),
+                self._clean_value(row.get("scope_value")),
+            )
+
+        return "host", self._clean_value(row.get("host"))
+
+    def _format_action_row(self, row):
+
+        action_row = row.to_dict()
+
+        action_row["action"] = [
+            action.strip()
+            for action in str(action_row["action"]).split(",")
+            if action.strip()
+        ]
+
+        return action_row
+
+    def _clean_value(self, value):
+
+        if pd.isna(value):
+
+            return None
+
+        return str(value).strip()
 
     def get_contact(self, client, team):
 
