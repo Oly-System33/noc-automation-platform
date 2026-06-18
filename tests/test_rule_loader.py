@@ -204,5 +204,71 @@ class RuleLoaderGetActionTest(unittest.TestCase):
         self.assertEqual(action["action"], ["email", "calls"])
 
 
+class RuleLoaderHostParsingTest(unittest.TestCase):
+
+    def setUp(self):
+        self.loader = RuleLoader()
+
+    def test_extract_client_and_host_valid_formats(self):
+        cases = [
+            ("Cliente/Host", ("Cliente", "Host")),
+            ("Cliente / Host", ("Cliente", "Host")),
+            ("Banco X/test-noc", ("Banco X", "test-noc")),
+            ("Banco X / test-noc", ("Banco X", "test-noc")),
+            ("OTEK/SERVERCBA", ("OTEK", "SERVERCBA")),
+        ]
+
+        for value, expected in cases:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    self.loader.extract_client_and_host(value),
+                    expected,
+                )
+
+    def test_extract_client_and_host_invalid_or_partial_formats(self):
+        cases = [
+            ("Host sin cliente", ("unknown", "Host sin cliente")),
+            (None, ("unknown", "unknown")),
+            ("", ("unknown", "unknown")),
+            ("   ", ("unknown", "unknown")),
+            ("/Host", ("unknown", "Host")),
+            ("Cliente/", ("Cliente", "unknown")),
+        ]
+
+        for value, expected in cases:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    self.loader.extract_client_and_host(value),
+                    expected,
+                )
+
+    def test_extract_client_and_host_splits_only_first_slash(self):
+        cases = [
+            ("Cliente/Subgrupo/Host", ("Cliente", "Subgrupo/Host")),
+            ("Cliente / Subgrupo / Host", ("Cliente", "Subgrupo / Host")),
+            ("Cliente/Subgrupo/Host/Extra", ("Cliente", "Subgrupo/Host/Extra")),
+        ]
+
+        for value, expected in cases:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    self.loader.extract_client_and_host(value),
+                    expected,
+                )
+
+    def test_extract_client_and_host_accepts_non_string_values(self):
+        cases = [
+            (123, ("unknown", "123")),
+            ({"host": "server"}, ("unknown", "{'host': 'server'}")),
+        ]
+
+        for value, expected in cases:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    self.loader.extract_client_and_host(value),
+                    expected,
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

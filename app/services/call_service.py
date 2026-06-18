@@ -1,4 +1,5 @@
 from app.integrations.vonage_voice import VonageVoiceClient
+from app.rules.rule_loader import rule_loader
 
 
 class CallService:
@@ -32,7 +33,7 @@ class CallService:
         return self.build_message(event)
 
     def build_message(self, event):
-        client, host = self._extract_client_and_host(event.host)
+        client, host = rule_loader.extract_client_and_host(event.host)
 
         return (
             "Alerta crítica del NOC. "
@@ -42,16 +43,5 @@ class CallService:
             f"Severidad {event.severity}. "
             f"Estado {event.status}."
         )
-
-    def _extract_client_and_host(self, full_host):
-        host_value = str(full_host or "unknown")
-
-        if "/" not in host_value:
-            return "unknown", host_value
-
-        client, host = host_value.split("/", 1)
-
-        return client.strip() or "unknown", host.strip() or host_value
-
 
 call_service = CallService()

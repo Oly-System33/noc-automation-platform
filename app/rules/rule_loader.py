@@ -49,9 +49,24 @@ class RuleLoader:
 
     def extract_client_and_host(self, full_host: str):
 
-        client, host = full_host.split("/", 1)
+        host_value = str(full_host).strip() if full_host is not None else ""
 
-        return client.strip(), host.strip()
+        if not host_value:
+            print("[WARNING] Invalid or empty host received, using unknown/unknown")
+            return "unknown", "unknown"
+
+        if "/" not in host_value:
+            print("[WARNING] Host without client received, using client=unknown")
+            return "unknown", host_value or "unknown"
+
+        client, host = host_value.split("/", 1)
+        client = client.strip() or "unknown"
+        host = host.strip() or "unknown"
+
+        if client == "unknown":
+            print("[WARNING] Host without client received, using client=unknown")
+
+        return client, host
 
     def is_host_monitored(self, client: str, host: str):
 

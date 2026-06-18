@@ -21,6 +21,14 @@ class RuleEngine:
 
         print(f"[RULE_ENGINE] Cliente: {client} | Host: {host}")
 
+        try:
+            self._evaluate_problem_with_runbook(event, client, host)
+        except FileNotFoundError:
+            event.unprocessable_event = True
+            print(f"[WARNING] Runbook not found for client: {client}")
+
+    def _evaluate_problem_with_runbook(self, event, client, host):
+
         # 2) verificar host monitoreado
         if not rule_loader.is_host_monitored(client, host):
 
