@@ -273,7 +273,15 @@ class ActionDispatcher:
             request_type=request_type
         )
 
-        print(f"[DISPATCH][JIRA] Ticket creado: {response}")
+        if response.get("success"):
+            print(f"[DISPATCH][JIRA] Ticket creado: {response.get('issue_key')}")
+            return
+
+        print(
+            "[ERROR] Jira ticket creation failed | "
+            f"status={response.get('status')} | "
+            f"error={response.get('error')}"
+        )
 
     def _action_teams(self, event, contact):
 
