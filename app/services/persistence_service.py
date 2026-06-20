@@ -210,7 +210,9 @@ class PersistenceService:
 
     def create_scheduled_action(self, event, client, host, trigger_group, actions, target, contacts_payload, scheduled_at):
 
-        def operation(session):
+        session = SessionLocal()
+
+        try:
             record = ScheduledActionRecord(
                 event_id=getattr(event, "event_id", None),
                 client=client,
@@ -225,8 +227,44 @@ class PersistenceService:
                 state="pending",
             )
             session.add(record)
+            session.flush()
 
-        return self._run(operation)
+            response = {
+                "success": True,
+                "scheduled_action_id": record.id,
+                "scheduled_at": scheduled_at.isoformat() if scheduled_at else None,
+                "state": record.state,
+                "error": None,
+            }
+
+            session.commit()
+
+            return response
+
+        except SQLAlchemyError as e:
+            session.rollback()
+            print(f"[ERROR] Database operation failed: {e}")
+            return {
+                "success": False,
+                "scheduled_action_id": None,
+                "scheduled_at": None,
+                "state": None,
+                "error": str(e),
+            }
+
+        except Exception as e:
+            session.rollback()
+            print(f"[ERROR] Database operation failed: {e}")
+            return {
+                "success": False,
+                "scheduled_action_id": None,
+                "scheduled_at": None,
+                "state": None,
+                "error": str(e),
+            }
+
+        finally:
+            session.close()
 
 
 persistence_service = PersistenceService()

@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from app.rules.rule_loader import rule_loader
 from app.services.action_dispatcher import ActionDispatcher
 from app.services.persistence_service import persistence_service
@@ -153,6 +155,18 @@ class RuleEngine:
             return
 
         team = action["target"]
+        delay_minutes = action.get("delay_minutes", 0)
+
+        if action.get("delay_minutes_invalid"):
+            print("[WARNING] Invalid delay_minutes, using 0")
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="WARNING",
+                component="rule_engine",
+                message="Invalid delay_minutes, using 0",
+                details={"value": action.get("delay_minutes_raw")},
+            )
+
         persistence_service.record_audit_log(
             event_id=event.event_id,
             level="INFO",
@@ -162,6 +176,7 @@ class RuleEngine:
                 "actions": action.get("action"),
                 "target": team,
                 "trigger_group": trigger_group,
+                "delay_minutes": delay_minutes,
             },
         )
 
@@ -184,6 +199,26 @@ class RuleEngine:
             if "jira_request_type" in action:
                 target_contact["jira_request_type"] = action["jira_request_type"]
 
+        action_plan = self._build_action_plan(
+            event=event,
+            client=client,
+            host=host,
+            trigger_group=trigger_group,
+            action=action,
+            target=team,
+            baseline_contact=baseline_contact,
+            target_contact=target_contact,
+            delay_minutes=delay_minutes,
+        )
+
+        if delay_minutes > 0:
+            self._schedule_action_plan(action_plan)
+            return
+
+        self._execute_action_plan(action_plan)
+
+    def _build_action_plan(self, event, client, host, trigger_group, action, target, baseline_contact, target_contact, delay_minutes):
+
         email_recipients = []
 
         baseline_email = baseline_contact.get(
@@ -197,10 +232,39 @@ class RuleEngine:
         if target_email and target_email == target_email:
             email_recipients.append(str(target_email))
 
-        # dispatch EMAIL consolidado
-        if email_recipients:
+        merged_recipients = ";".join(email_recipients) if email_recipients else None
+        other_actions = [
+            a for a in action["action"]
+            if a != "email"
+        ]
 
-            merged_recipients = ";".join(email_recipients)
+        return {
+            "event": event,
+            "client": client,
+            "host": host,
+            "trigger_group": trigger_group,
+            "actions": action["action"],
+            "target": target,
+            "contacts": {
+                "baseline_contact": baseline_contact,
+                "target_contact": target_contact,
+                "email_recipients": email_recipients,
+                "merged_email_recipients": merged_recipients,
+                "other_actions": other_actions,
+            },
+            "delay_minutes": delay_minutes,
+        }
+
+    def _execute_action_plan(self, action_plan):
+
+        event = action_plan["event"]
+        contacts = action_plan["contacts"]
+        merged_recipients = contacts["merged_email_recipients"]
+        other_actions = contacts["other_actions"]
+        target_contact = contacts["target_contact"]
+
+        # dispatch EMAIL consolidado
+        if merged_recipients:
 
             self.dispatcher.dispatch(
                 event=event,
@@ -209,11 +273,6 @@ class RuleEngine:
             )
 
         # ejecutar otras acciones no-email normalmente
-        other_actions = [
-            a for a in action["action"]
-            if a != "email"
-        ]
-
         if other_actions and target_contact:
 
             self.dispatcher.dispatch(
@@ -221,6 +280,77 @@ class RuleEngine:
                 actions=other_actions,
                 contacts=[target_contact]
             )
+
+    def _schedule_action_plan(self, action_plan):
+
+        event = action_plan["event"]
+        delay_minutes = action_plan["delay_minutes"]
+        scheduled_at = datetime.now(timezone.utc) + timedelta(minutes=delay_minutes)
+        contacts = action_plan["contacts"]
+
+        contacts_payload = {
+            "baseline_contact": contacts["baseline_contact"],
+            "target_contact": contacts["target_contact"],
+            "email_recipients": contacts["email_recipients"],
+            "merged_email_recipients": contacts["merged_email_recipients"],
+            "dispatch_contacts": {
+                "email": [contacts["merged_email_recipients"]]
+                if contacts["merged_email_recipients"] else [],
+                "other": [contacts["target_contact"]]
+                if contacts["target_contact"] else [],
+            },
+            "worker_note": "Plan is pre-resolved; worker should not need to reload Excel.",
+        }
+
+        result = persistence_service.create_scheduled_action(
+            event=event,
+            client=action_plan["client"],
+            host=action_plan["host"],
+            trigger_group=action_plan["trigger_group"],
+            actions=action_plan["actions"],
+            target=action_plan["target"],
+            contacts_payload=contacts_payload,
+            scheduled_at=scheduled_at,
+        )
+
+        if result.get("success"):
+            print(
+                "[RULE_ENGINE] Action scheduled | "
+                f"event_id={event.event_id} | "
+                f"delay_minutes={delay_minutes} | "
+                f"scheduled_at={result.get('scheduled_at')}"
+            )
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="INFO",
+                component="rule_engine",
+                message="Action scheduled",
+                details={
+                    "event_id": event.event_id,
+                    "delay_minutes": delay_minutes,
+                    "scheduled_at": result.get("scheduled_at"),
+                    "actions": action_plan["actions"],
+                    "target": action_plan["target"],
+                    "scheduled_action_id": result.get("scheduled_action_id"),
+                },
+            )
+            return
+
+        print(
+            "[ERROR] Failed to schedule action | "
+            f"event_id={event.event_id} | "
+            f"error={result.get('error')}"
+        )
+        persistence_service.record_audit_log(
+            event_id=event.event_id,
+            level="ERROR",
+            component="database",
+            message="Failed to schedule action",
+            details={
+                "event_id": event.event_id,
+                "error": result.get("error"),
+            },
+        )
 
     def close_incident(self, event, duration):
 

@@ -240,6 +240,13 @@ class RuleLoader:
     def _format_action_row(self, row):
 
         action_row = row.to_dict()
+        action_row["delay_minutes_raw"] = action_row.get("delay_minutes")
+        action_row["delay_minutes_invalid"] = self.is_invalid_delay_minutes(
+            action_row.get("delay_minutes")
+        )
+        action_row["delay_minutes"] = self.parse_delay_minutes(
+            action_row.get("delay_minutes")
+        )
 
         action_row["action"] = [
             action.strip()
@@ -248,6 +255,48 @@ class RuleLoader:
         ]
 
         return action_row
+
+    def parse_delay_minutes(self, value):
+
+        if pd.isna(value):
+
+            return 0
+
+        value = str(value).strip()
+
+        if not value:
+
+            return 0
+
+        try:
+            delay_minutes = int(float(value))
+        except ValueError:
+            return 0
+
+        if delay_minutes < 0:
+
+            return 0
+
+        return delay_minutes
+
+    def is_invalid_delay_minutes(self, value):
+
+        if pd.isna(value):
+
+            return False
+
+        value = str(value).strip()
+
+        if not value:
+
+            return False
+
+        try:
+            float(value)
+        except ValueError:
+            return True
+
+        return False
 
     def _clean_value(self, value):
 

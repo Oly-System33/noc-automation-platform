@@ -203,6 +203,56 @@ class RuleLoaderGetActionTest(unittest.TestCase):
 
         self.assertEqual(action["action"], ["email", "calls"])
 
+    def test_delay_minutes_is_parsed_from_action_row(self):
+        self.load_runbook(
+            hosts=[{"host": "server01"}],
+            actions=[{
+                "host": "server01",
+                "trigger_group": "availability",
+                "action": "email,jira,calls",
+                "target": "guardia_msp",
+                "delay_minutes": "15",
+            }],
+        )
+
+        action = self.loader.get_action("client", "server01", "availability")
+
+        self.assertEqual(action["delay_minutes"], 15)
+
+    def test_missing_delay_minutes_defaults_to_zero(self):
+        self.load_runbook(
+            hosts=[{"host": "server01"}],
+            actions=[{
+                "host": "server01",
+                "trigger_group": "availability",
+                "action": "email",
+                "target": "baseline",
+            }],
+        )
+
+        action = self.loader.get_action("client", "server01", "availability")
+
+        self.assertEqual(action["delay_minutes"], 0)
+
+    def test_parse_delay_minutes_handles_invalid_values(self):
+        cases = [
+            (None, 0),
+            (float("nan"), 0),
+            ("", 0),
+            (" ", 0),
+            ("15", 15),
+            (15.0, 15),
+            (-1, 0),
+            ("abc", 0),
+        ]
+
+        for value, expected in cases:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    self.loader.parse_delay_minutes(value),
+                    expected,
+                )
+
 
 class RuleLoaderHostParsingTest(unittest.TestCase):
 

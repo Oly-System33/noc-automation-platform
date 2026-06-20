@@ -81,7 +81,43 @@ SELECT * FROM audit_logs ORDER BY created_at DESC;
 SELECT * FROM scheduled_actions ORDER BY created_at DESC;
 ```
 
-## 9. Docker Compose
+## 9. Test Delayed Actions
+
+In the runbook `actions` sheet, add or update the optional column:
+
+```text
+delay_minutes
+```
+
+Use `1` for a local scheduling test.
+
+Then send a PROBLEM event that matches that action rule. Expected result:
+
+- no email, Jira, calls, Telegram or Teams action runs immediately;
+- one row is inserted into `scheduled_actions`;
+- `state` is `pending`;
+- `scheduled_at` is approximately `created_at + 1 minute`;
+- `events`, `incidents` and `audit_logs` are still updated.
+
+Verify with:
+
+```sql
+SELECT event_id, actions, target, state, scheduled_at, created_at
+FROM scheduled_actions
+ORDER BY created_at DESC;
+
+SELECT event_id, current_status, opened_at
+FROM incidents
+ORDER BY created_at DESC;
+
+SELECT level, component, message, details
+FROM audit_logs
+ORDER BY created_at DESC;
+```
+
+Set `delay_minutes` to `0` or leave it empty to execute actions immediately as before.
+
+## 10. Docker Compose
 
 The compose file includes a `postgres` service and `postgres_data` volume. To run the full stack:
 
