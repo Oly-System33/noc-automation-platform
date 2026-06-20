@@ -129,12 +129,13 @@ curl http://3.89.189.230:8000/docs
 curl -X POST http://3.89.189.230:8000/zabbix/webhook \
   -H "Content-Type: application/json" \
   -d '{
-    "host": "Banco X/server01",
-    "trigger": "CPU high",
-    "severity": "High",
-    "status": 1,
-    "event_id": "demo-001",
-    "timestamp": "2026-05-10T12:00:00Z"
+    "host": "Banco X / test-noc",
+    "trigger": "Zabbix agent sin datos por 1 minuto",
+    "severity": "Crítico",
+    "status": "1",
+    "event_id": "239",
+    "timestamp": "00:03:28",
+    "duration": "0s"
   }'
 ```
 

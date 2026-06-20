@@ -1,5 +1,6 @@
 from app.rules.rule_loader import rule_loader
 from app.services.action_dispatcher import ActionDispatcher
+from app.services.persistence_service import persistence_service
 
 
 class RuleEngine:
@@ -18,14 +19,30 @@ class RuleEngine:
 
         # 1) separar cliente y host
         client, host = rule_loader.extract_client_and_host(event.host)
+        event.client = client
+        event.parsed_host = host
 
         print(f"[RULE_ENGINE] Cliente: {client} | Host: {host}")
+        persistence_service.record_audit_log(
+            event_id=event.event_id,
+            level="INFO",
+            component="rule_engine",
+            message="Client and host detected",
+            details={"client": client, "host": host},
+        )
 
         try:
             self._evaluate_problem_with_runbook(event, client, host)
         except FileNotFoundError:
             event.unprocessable_event = True
             print(f"[WARNING] Runbook not found for client: {client}")
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="WARNING",
+                component="rule_engine",
+                message=f"Runbook not found for client: {client}",
+                details={"client": client, "host": host},
+            )
 
     def _evaluate_problem_with_runbook(self, event, client, host):
 
@@ -33,6 +50,13 @@ class RuleEngine:
         if not rule_loader.is_host_monitored(client, host):
 
             print("[INFO] Host no monitoreado")
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="INFO",
+                component="rule_engine",
+                message="Host not monitored",
+                details={"client": client, "host": host},
+            )
 
             event.unmanaged_host = True
 
@@ -59,11 +83,38 @@ class RuleEngine:
         )
 
         print(f"[INFO] Trigger group detectado: {trigger_group}")
+        event.trigger_group = trigger_group
+        persistence_service.update_event_context(
+            event_id=event.event_id,
+            client=client,
+            host=host,
+            trigger_group=trigger_group,
+        )
+        persistence_service.open_incident(
+            event=event,
+            client=client,
+            host=host,
+            trigger_group=trigger_group,
+        )
+        persistence_service.record_audit_log(
+            event_id=event.event_id,
+            level="INFO",
+            component="rule_engine",
+            message="Trigger group detected",
+            details={"trigger_group": trigger_group},
+        )
 
         # 4) verificar suppressions
         if rule_loader.is_suppressed(client, host, trigger_group):
 
             print("[INFO] Evento suprimido por regla horaria")
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="INFO",
+                component="rule_engine",
+                message="Event suppressed by schedule rule",
+                details={"trigger_group": trigger_group},
+            )
 
             return
 
@@ -77,6 +128,13 @@ class RuleEngine:
         if not action:
 
             print("[INFO] No hay acción adicional definida")
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="INFO",
+                component="rule_engine",
+                message="No additional action defined",
+                details={"trigger_group": trigger_group},
+            )
 
             baseline_contact = rule_loader.get_contact(client, "baseline")
 
@@ -95,6 +153,17 @@ class RuleEngine:
             return
 
         team = action["target"]
+        persistence_service.record_audit_log(
+            event_id=event.event_id,
+            level="INFO",
+            component="rule_engine",
+            message="Action found",
+            details={
+                "actions": action.get("action"),
+                "target": team,
+                "trigger_group": trigger_group,
+            },
+        )
 
         baseline_contact = rule_loader.get_contact(client, "baseline")
 
@@ -156,10 +225,19 @@ class RuleEngine:
     def close_incident(self, event, duration):
 
         client, host = rule_loader.extract_client_and_host(event.host)
+        event.client = client
+        event.parsed_host = host
 
         print(
             f"[RULE_ENGINE] Incidente cerrado: {host} "
             f"(duración: {duration})"
+        )
+        persistence_service.record_audit_log(
+            event_id=event.event_id,
+            level="INFO",
+            component="rule_engine",
+            message="Incident closed",
+            details={"client": client, "host": host, "duration": duration},
         )
 
 

@@ -1,5 +1,7 @@
 from typing import Dict, Optional
 from app.models.event_model import ZabbixEvent
+from app.rules.rule_loader import rule_loader
+from app.services.persistence_service import persistence_service
 
 
 class EventProcessor:
@@ -15,12 +17,49 @@ class EventProcessor:
 
     def process(self, event: ZabbixEvent) -> Optional[dict]:
 
+        client, host = rule_loader.extract_client_and_host(event.host)
+        event.client = client
+        event.parsed_host = host
+
+        persistence_service.record_event(
+            event=event,
+            client=client,
+            host=host,
+            raw_payload=getattr(event, "raw_payload", None),
+        )
+
+        persistence_service.record_audit_log(
+            event_id=event.event_id,
+            level="INFO",
+            component="event_processor",
+            message="Event received",
+            details={
+                "client": client,
+                "host": host,
+                "status": event.status,
+            },
+        )
+
         if event.event_id is None:
             print("[WARNING] Evento sin event_id, ignorado")
+            persistence_service.record_audit_log(
+                event_id=None,
+                level="WARNING",
+                component="event_processor",
+                message="Event without event_id ignored",
+                details={"host": event.host, "status": event.status},
+            )
             return None
 
         if event.timestamp is None:
             print("[WARNING] Evento sin timestamp, ignorado")
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="WARNING",
+                component="event_processor",
+                message="Event without timestamp ignored",
+                details={"host": event.host, "status": event.status},
+            )
             return None
 
         status = str(event.status)
@@ -41,6 +80,23 @@ class EventProcessor:
 
         self.active_events[event.event_id] = event
 
+        persistence_service.open_incident(
+            event=event,
+            client=getattr(event, "client", None),
+            host=getattr(event, "parsed_host", None),
+        )
+
+        persistence_service.record_audit_log(
+            event_id=event.event_id,
+            level="INFO",
+            component="event_processor",
+            message="Problem event registered",
+            details={
+                "client": getattr(event, "client", None),
+                "host": getattr(event, "parsed_host", None),
+            },
+        )
+
         print(f"[PROBLEM] {event.host} - {event.trigger}")
 
         return {
@@ -55,11 +111,33 @@ class EventProcessor:
 
         problem_event = self.active_events.get(event.event_id)
 
+        incident_closed = persistence_service.close_incident(
+            event=event,
+            client=getattr(event, "client", None),
+            host=getattr(event, "parsed_host", None),
+            duration=event.duration or "unknown",
+        )
+
         if not problem_event:
             print(f"[WARNING] RECOVERY sin PROBLEM previo: {event.event_id}")
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="WARNING",
+                component="event_processor",
+                message="Recovery without previous problem",
+                details={"incident_closed": incident_closed},
+            )
             return None
 
         duration = event.duration or "unknown"
+
+        persistence_service.record_audit_log(
+            event_id=event.event_id,
+            level="INFO",
+            component="event_processor",
+            message="Recovery event processed",
+            details={"duration": duration, "incident_closed": incident_closed},
+        )
 
         print(
             f"[RECOVERY] {event.host} - duración total: {duration}"

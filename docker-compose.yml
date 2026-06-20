@@ -8,7 +8,26 @@ services:
       - .env
     environment:
       RUNBOOKS_PATH: /app/runbooks
+      DATABASE_URL: postgresql://noc_engine:noc_engine@postgres:5432/noc_engine
     volumes:
       - ./runbooks:/app/runbooks
       - ./private.key:/app/private.key:ro
+    depends_on:
+      - postgres
     restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    container_name: noc_postgres
+    environment:
+      POSTGRES_DB: noc_engine
+      POSTGRES_USER: noc_engine
+      POSTGRES_PASSWORD: noc_engine
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

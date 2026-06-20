@@ -11,6 +11,7 @@ class ZabbixEvent:
     event_id: Optional[str] = None
     timestamp: Optional[str] = None
     duration: Optional[str] = None
+    raw_payload: Optional[dict] = None
 
     @classmethod
     def from_dict(cls, data: dict):
@@ -22,4 +23,5 @@ class ZabbixEvent:
             event_id=data.get("event_id"),
             timestamp=data.get("timestamp"),
             duration=data.get("duration"),
+            raw_payload=data.copy(),
         )
