@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Integer, String, Text, func
+from sqlalchemy import Column, DateTime, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db.base import Base
@@ -77,6 +77,9 @@ class AuditLogRecord(Base):
 
 class ScheduledActionRecord(Base):
     __tablename__ = "scheduled_actions"
+    __table_args__ = (
+        Index("ix_scheduled_actions_state_scheduled_at", "state", "scheduled_at"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     event_id = Column(String, index=True, nullable=True)

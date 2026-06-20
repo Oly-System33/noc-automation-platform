@@ -105,21 +105,29 @@ class ActionDispatcher:
             f"{event.host}"
         )
 
+        results = []
+
         for action in actions:
 
             handler = self.ACTION_MAP.get(action)
 
             if not handler:
                 print(f"[WARNING] Unknown action type: {action}")
+                results.append({
+                    "action": action,
+                    "success": False,
+                    "error": "Unknown action type",
+                })
                 continue
 
             try:
-                self._dispatch_single_action(
+                action_results = self._dispatch_single_action(
                     handler,
                     action,
                     event,
                     contacts
                 )
+                results.extend(action_results)
 
             except Exception as e:
                 print(
@@ -133,11 +141,30 @@ class ActionDispatcher:
                     status="failed",
                     error_message=str(e),
                 )
+                results.append({
+                    "action": action,
+                    "success": False,
+                    "error": str(e),
+                })
+
+        return {
+            "success": all(result["success"] for result in results) if results else True,
+            "results": results,
+        }
 
     def _dispatch_single_action(self, handler, action, event, contacts):
 
+        results = []
+
         for contact in contacts:
-            handler(event, contact)
+            success = handler(event, contact)
+            results.append({
+                "action": action,
+                "success": bool(success),
+                "contact": contact,
+            })
+
+        return results
 
     # ========================
     # ACTION HANDLERS
@@ -307,10 +334,13 @@ class ActionDispatcher:
 
         status = "PROBLEM" if str(event.status) == "1" else "RECOVERY"
 
-        jira_priority = rule_loader.get_jira_priority(
-            client,
-            event.severity
-        )
+        jira_priority = contact.get("jira_priority")
+
+        if not jira_priority:
+            jira_priority = rule_loader.get_jira_priority(
+                client,
+                event.severity
+            )
 
         print(f"[DEBUG] Creating Jira ticket in project: {project_key}")
         print(f"[DEBUG] Jira priority resolved: {jira_priority}")

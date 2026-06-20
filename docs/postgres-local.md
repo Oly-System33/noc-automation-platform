@@ -117,7 +117,101 @@ ORDER BY created_at DESC;
 
 Set `delay_minutes` to `0` or leave it empty to execute actions immediately as before.
 
-## 10. Docker Compose
+## 10. Run Scheduled Actions Worker
+
+For local testing, the worker can run automatically inside FastAPI.
+
+Set these values in `.env`:
+
+```text
+SCHEDULED_ACTION_WORKER_ENABLED=true
+SCHEDULED_ACTION_POLL_INTERVAL_SECONDS=5
+SCHEDULED_ACTION_BATCH_SIZE=20
+```
+
+Then start the app normally:
+
+```bash
+DATABASE_URL=postgresql://noc_engine:noc_engine@localhost:5432/noc_engine \
+  .venv/bin/uvicorn app.main:app --reload
+```
+
+With that setup, a PROBLEM with `delay_minutes > 0` is scheduled and the same app process polls and executes it after `scheduled_at`.
+
+The worker uses `pending -> processing` before execution to avoid duplicate execution if more than one process sees the same row.
+
+For debugging, you can still run the worker manually in another terminal by setting `SCHEDULED_ACTION_WORKER_ENABLED=false` for the app and using:
+
+```bash
+DATABASE_URL=postgresql://noc_engine:noc_engine@localhost:5432/noc_engine \
+SCHEDULED_ACTION_POLL_INTERVAL_SECONDS=5 \
+  .venv/bin/python -m app.services.scheduled_action_worker
+```
+
+The worker polls `scheduled_actions` for rows where:
+
+```sql
+state = 'pending'
+AND scheduled_at <= now()
+```
+
+It claims each row as `processing`, checks that the incident is still `open`, and then executes the saved action plan.
+
+When using `uvicorn --reload`, reloads can restart the background worker. The `processing` claim protects execution, but if you are debugging worker behavior, the manual command is easier to observe.
+
+### Delayed Action Without Recovery
+
+1. Set `delay_minutes = 1` in the matching runbook action.
+2. Send a matching PROBLEM event.
+3. Confirm it is pending:
+
+```sql
+SELECT event_id, state, scheduled_at
+FROM scheduled_actions
+ORDER BY created_at DESC;
+```
+
+4. Wait for the worker to process it.
+5. Confirm execution:
+
+```sql
+SELECT event_id, state, executed_at, error_message
+FROM scheduled_actions
+ORDER BY created_at DESC;
+
+SELECT event_id, action_type, status, created_at
+FROM actions
+ORDER BY created_at DESC;
+```
+
+### Delayed Action With Recovery Before Execution
+
+1. Send a matching PROBLEM event with `delay_minutes = 1`.
+2. Send RECOVERY before the minute expires.
+3. Confirm cancellation:
+
+```sql
+SELECT event_id, state, cancelled_at, cancel_reason
+FROM scheduled_actions
+ORDER BY created_at DESC;
+```
+
+Expected:
+
+```text
+state = cancelled
+cancel_reason = recovery_received
+```
+
+### Worker Audit Logs
+
+```sql
+SELECT level, component, message, details
+FROM audit_logs
+ORDER BY created_at DESC;
+```
+
+## 11. Docker Compose
 
 The compose file includes a `postgres` service and `postgres_data` volume. To run the full stack:
 

@@ -190,6 +190,12 @@ class RuleEngine:
         # inyectar jira_project, jira_issue_type, jira_request_type desde hoja actions
         if target_contact:
 
+            if "jira" in action.get("action", []):
+                target_contact["jira_priority"] = rule_loader.get_jira_priority(
+                    client,
+                    event.severity,
+                )
+
             if "jira_project" in action:
                 target_contact["jira_project"] = action["jira_project"]
 

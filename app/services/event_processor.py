@@ -118,6 +118,23 @@ class EventProcessor:
             duration=event.duration or "unknown",
         )
 
+        cancelled_actions = persistence_service.cancel_pending_scheduled_actions(
+            event.event_id,
+            reason="recovery_received",
+        )
+
+        persistence_service.record_audit_log(
+            event_id=event.event_id,
+            level="INFO" if cancelled_actions.get("success") else "ERROR",
+            component="event_processor",
+            message="Pending scheduled actions cancelled due to recovery",
+            details={
+                "event_id": event.event_id,
+                "count": cancelled_actions.get("count"),
+                "error": cancelled_actions.get("error"),
+            },
+        )
+
         if not problem_event:
             print(f"[WARNING] RECOVERY sin PROBLEM previo: {event.event_id}")
             persistence_service.record_audit_log(

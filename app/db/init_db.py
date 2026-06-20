@@ -7,11 +7,19 @@ from app.db.models import (  # noqa: F401
     ScheduledActionRecord,
 )
 from app.db.session import DATABASE_URL, engine, sanitize_database_url
+from sqlalchemy import text
 
 
 def init_db():
 
     Base.metadata.create_all(bind=engine)
+
+    with engine.begin() as connection:
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS "
+            "ix_scheduled_actions_state_scheduled_at "
+            "ON scheduled_actions (state, scheduled_at)"
+        ))
 
 
 if __name__ == "__main__":

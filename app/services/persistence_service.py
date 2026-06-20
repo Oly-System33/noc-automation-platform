@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -13,6 +13,10 @@ from app.db.session import SessionLocal
 
 
 class PersistenceService:
+
+    def _now(self):
+
+        return datetime.now(timezone.utc)
 
     def _safe_value(self, value):
 
@@ -262,6 +266,164 @@ class PersistenceService:
                 "state": None,
                 "error": str(e),
             }
+
+        finally:
+            session.close()
+
+    def get_due_scheduled_actions(self, batch_size):
+
+        session = SessionLocal()
+
+        try:
+            records = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.state == "pending")
+                .filter(ScheduledActionRecord.scheduled_at <= self._now())
+                .order_by(ScheduledActionRecord.scheduled_at)
+                .limit(batch_size)
+                .all()
+            )
+
+            return [self._scheduled_action_to_dict(record) for record in records]
+
+        except Exception as e:
+            print(f"[ERROR] Database operation failed: {e}")
+            return []
+
+        finally:
+            session.close()
+
+    def _scheduled_action_to_dict(self, record):
+
+        return {
+            "id": record.id,
+            "event_id": record.event_id,
+            "client": record.client,
+            "host": record.host,
+            "trigger": record.trigger,
+            "trigger_group": record.trigger_group,
+            "severity": record.severity,
+            "actions": record.actions,
+            "target": record.target,
+            "contacts_payload": record.contacts_payload,
+            "scheduled_at": record.scheduled_at,
+            "state": record.state,
+            "created_at": record.created_at,
+        }
+
+    def claim_scheduled_action(self, scheduled_action_id):
+
+        def operation(session):
+            updated = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.id == scheduled_action_id)
+                .filter(ScheduledActionRecord.state == "pending")
+                .update({"state": "processing"})
+            )
+
+            return updated == 1
+
+        return bool(self._run(operation))
+
+    def get_incident_status(self, event_id):
+
+        if not event_id:
+            return None
+
+        def operation(session):
+            incident = (
+                session.query(IncidentRecord)
+                .filter(IncidentRecord.event_id == event_id)
+                .one_or_none()
+            )
+
+            if not incident:
+                return None
+
+            return incident.current_status
+
+        return self._run(operation)
+
+    def mark_scheduled_action_executed(self, scheduled_action_id):
+
+        def operation(session):
+            updated = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.id == scheduled_action_id)
+                .filter(ScheduledActionRecord.state == "processing")
+                .update({
+                    "state": "executed",
+                    "executed_at": self._now(),
+                    "error_message": None,
+                })
+            )
+
+            return updated == 1
+
+        return bool(self._run(operation))
+
+    def mark_scheduled_action_failed(self, scheduled_action_id, error_message):
+
+        def operation(session):
+            updated = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.id == scheduled_action_id)
+                .filter(ScheduledActionRecord.state == "processing")
+                .update({
+                    "state": "failed",
+                    "error_message": error_message,
+                })
+            )
+
+            return updated == 1
+
+        return bool(self._run(operation))
+
+    def cancel_scheduled_action(self, scheduled_action_id, reason):
+
+        def operation(session):
+            updated = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.id == scheduled_action_id)
+                .filter(ScheduledActionRecord.state.in_(["pending", "processing"]))
+                .update({
+                    "state": "cancelled",
+                    "cancelled_at": self._now(),
+                    "cancel_reason": reason,
+                })
+            )
+
+            return updated == 1
+
+        return bool(self._run(operation))
+
+    def cancel_pending_scheduled_actions(self, event_id, reason="recovery_received"):
+
+        if not event_id:
+            return {"success": False, "count": 0, "error": "Missing event_id"}
+
+        session = SessionLocal()
+
+        try:
+            count = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.event_id == event_id)
+                .filter(ScheduledActionRecord.state == "pending")
+                .update({
+                    "state": "cancelled",
+                    "cancelled_at": self._now(),
+                    "cancel_reason": reason,
+                })
+            )
+
+            session.commit()
+
+            return {"success": True, "count": count, "error": None}
+
+        except Exception as e:
+            session.rollback()
+            print(f"[ERROR] Database operation failed: {e}")
+            return {"success": False, "count": 0, "error": str(e)}
 
         finally:
             session.close()
