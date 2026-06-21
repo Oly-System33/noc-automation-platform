@@ -203,6 +203,85 @@ class RuleLoaderGetActionTest(unittest.TestCase):
 
         self.assertEqual(action["action"], ["email", "calls"])
 
+    def test_actions_are_normalized_from_aliases_and_mixed_case(self):
+        self.load_runbook(
+            hosts=[{"host": "server01"}],
+            actions=[{
+                "host": "server01",
+                "trigger_group": "availability",
+                "action": "JIRA, Calls, mail, tg, msteams",
+                "target": "guardia_msp",
+            }],
+        )
+
+        action = self.loader.get_action("client", "server01", "availability")
+
+        self.assertEqual(
+            action["action"],
+            ["jira", "calls", "email", "telegram", "teams"],
+        )
+        self.assertEqual(action["invalid_actions"], [])
+
+    def test_actions_support_semicolon_and_pipe_separators(self):
+        self.load_runbook(
+            hosts=[{"host": "server01"}],
+            actions=[{
+                "host": "server01",
+                "trigger_group": "availability",
+                "action": "ticket;llamada|correo",
+                "target": "guardia_msp",
+            }],
+        )
+
+        action = self.loader.get_action("client", "server01", "availability")
+
+        self.assertEqual(action["action"], ["jira", "calls", "email"])
+
+    def test_actions_remove_duplicates_preserving_order(self):
+        self.load_runbook(
+            hosts=[{"host": "server01"}],
+            actions=[{
+                "host": "server01",
+                "trigger_group": "availability",
+                "action": "calls,CALLS,call,jira,ticket",
+                "target": "guardia_msp",
+            }],
+        )
+
+        action = self.loader.get_action("client", "server01", "availability")
+
+        self.assertEqual(action["action"], ["calls", "jira"])
+
+    def test_actions_skip_unknown_values_and_track_invalid_actions(self):
+        self.load_runbook(
+            hosts=[{"host": "server01"}],
+            actions=[{
+                "host": "server01",
+                "trigger_group": "availability",
+                "action": "jira,calll,sms",
+                "target": "guardia_msp",
+            }],
+        )
+
+        action = self.loader.get_action("client", "server01", "availability")
+
+        self.assertEqual(action["action"], ["jira"])
+        self.assertEqual(action["invalid_actions"], ["calll", "sms"])
+
+    def test_normalize_actions_handles_empty_values(self):
+        cases = [
+            None,
+            float("nan"),
+            "",
+            " ",
+        ]
+
+        for value in cases:
+            with self.subTest(value=value):
+                actions, invalid_actions = self.loader.normalize_actions(value)
+                self.assertEqual(actions, [])
+                self.assertEqual(invalid_actions, [])
+
     def test_delay_minutes_is_parsed_from_action_row(self):
         self.load_runbook(
             hosts=[{"host": "server01"}],

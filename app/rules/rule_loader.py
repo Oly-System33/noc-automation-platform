@@ -1,4 +1,6 @@
 import os
+import re
+import unicodedata
 from pathlib import Path
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
@@ -6,6 +8,28 @@ import pandas as pd
 
 
 RUNBOOKS_PATH = Path(os.getenv("RUNBOOKS_PATH", "data/runbooks"))
+
+
+ACTION_ALIASES = {
+    "jira": "jira",
+    "ticket": "jira",
+    "issue": "jira",
+    "calls": "calls",
+    "call": "calls",
+    "cal": "calls",
+    "llamada": "calls",
+    "llamadas": "calls",
+    "phone": "calls",
+    "vonage": "calls",
+    "email": "email",
+    "mail": "email",
+    "correo": "email",
+    "telegram": "telegram",
+    "tg": "telegram",
+    "teams": "teams",
+    "msteams": "teams",
+    "microsoft teams": "teams",
+}
 
 
 class RuleLoader:
@@ -240,6 +264,7 @@ class RuleLoader:
     def _format_action_row(self, row):
 
         action_row = row.to_dict()
+        action_row["action_raw"] = action_row.get("action")
         action_row["delay_minutes_raw"] = action_row.get("delay_minutes")
         action_row["delay_minutes_invalid"] = self.is_invalid_delay_minutes(
             action_row.get("delay_minutes")
@@ -248,13 +273,59 @@ class RuleLoader:
             action_row.get("delay_minutes")
         )
 
-        action_row["action"] = [
-            action.strip()
-            for action in str(action_row["action"]).split(",")
-            if action.strip()
-        ]
+        actions, invalid_actions = self.normalize_actions(action_row.get("action"))
+        action_row["action"] = actions
+        action_row["invalid_actions"] = invalid_actions
 
         return action_row
+
+    def normalize_actions(self, value):
+
+        if pd.isna(value):
+
+            return [], []
+
+        raw_actions = [
+            action.strip()
+            for action in re.split(r"[,;|]", str(value))
+            if action.strip()
+        ]
+        actions = []
+        invalid_actions = []
+
+        for raw_action in raw_actions:
+
+            action = self.normalize_action_name(raw_action)
+
+            if not action:
+
+                invalid_actions.append(raw_action)
+                continue
+
+            if action not in actions:
+
+                actions.append(action)
+
+        return actions, invalid_actions
+
+    def normalize_action_name(self, value):
+
+        if pd.isna(value):
+
+            return None
+
+        normalized = unicodedata.normalize("NFKD", str(value).strip().lower())
+        normalized = "".join(
+            char for char in normalized
+            if not unicodedata.combining(char)
+        )
+        normalized = " ".join(normalized.split())
+
+        if not normalized:
+
+            return None
+
+        return ACTION_ALIASES.get(normalized)
 
     def parse_delay_minutes(self, value):
 

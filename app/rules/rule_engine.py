@@ -170,6 +170,44 @@ class RuleEngine:
         team = action["target"]
         delay_minutes = action.get("delay_minutes", 0)
 
+        if action.get("invalid_actions"):
+            print(
+                "[WARNING] Invalid runbook actions ignored | "
+                f"actions={action.get('invalid_actions')}"
+            )
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="WARNING",
+                component="rule_engine",
+                message="Invalid runbook actions ignored",
+                details={
+                    "invalid_actions": action.get("invalid_actions"),
+                    "raw_action": action.get("action_raw"),
+                    "client": client,
+                    "host": host,
+                    "trigger_group": trigger_group,
+                    "target": team,
+                },
+            )
+
+        if not action.get("action"):
+            print("[WARNING] No valid runbook actions found")
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="WARNING",
+                component="rule_engine",
+                message="No valid runbook actions found",
+                details={
+                    "raw_action": action.get("action_raw"),
+                    "invalid_actions": action.get("invalid_actions"),
+                    "client": client,
+                    "host": host,
+                    "trigger_group": trigger_group,
+                    "target": team,
+                },
+            )
+            return
+
         if action.get("delay_minutes_invalid"):
             print("[WARNING] Invalid delay_minutes, using 0")
             persistence_service.record_audit_log(
