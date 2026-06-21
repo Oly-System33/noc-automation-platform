@@ -31,6 +31,7 @@ def _build_answer_ncco(event_id):
             "action": "talk",
             "text": message,
             "language": "es-MX",
+            "bargeIn": True,
         },
         {
             "action": "talk",
@@ -39,6 +40,7 @@ def _build_answer_ncco(event_id):
                 "Presione 2 para repetir el mensaje."
             ),
             "language": "es-MX",
+            "bargeIn": True,
         },
         {
             "action": "input",
@@ -57,8 +59,12 @@ def _build_invalid_option_ncco(event_id):
     return [
         {
             "action": "talk",
-            "text": "Opción inválida.",
+            "text": (
+                "Opción inválida. Presione 1 para confirmar "
+                "o 2 para repetir el mensaje."
+            ),
             "language": "es-MX",
+            "bargeIn": True,
         },
         *_build_answer_ncco(event_id),
     ]
@@ -84,6 +90,10 @@ def _extract_digit(payload):
 
 @router.get("/vonage/answer")
 async def vonage_answer(event_id: str = Query(...)):
+    print(
+        f"[CALL] Speech reproducido con barge-in habilitado | "
+        f"event_id={event_id}"
+    )
     return JSONResponse(content=_build_answer_ncco(event_id))
 
 
@@ -92,9 +102,14 @@ async def vonage_input(request: Request, event_id: str = Query(...)):
     payload = await request.json()
     digit = _extract_digit(payload)
 
+    print(f"[CALL] DTMF recibido | event_id={event_id} | opción={digit}")
+
     if digit == "1":
         call_service.mark_confirmed(event_id)
-        print(f"[{console.green('CALL CONFIRMED')}] {console.green('Llamada confirmada')} | event_id={event_id}")
+        print(
+            f"[CALL] {console.green('Confirmación recibida')} | "
+            f"event_id={event_id} | opción=1"
+        )
 
         return JSONResponse(
             content=[
@@ -107,8 +122,16 @@ async def vonage_input(request: Request, event_id: str = Query(...)):
         )
 
     if digit == "2":
+        print(
+            f"[CALL] {console.cyan('Repetición solicitada')} | "
+            f"event_id={event_id} | opción=2"
+        )
         return JSONResponse(content=_build_answer_ncco(event_id))
 
+    print(
+        f"[CALL] {console.yellow('Opción inválida')} | "
+        f"event_id={event_id} | opción={digit}"
+    )
     return JSONResponse(content=_build_invalid_option_ncco(event_id))
 
 
