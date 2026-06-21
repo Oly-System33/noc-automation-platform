@@ -9,15 +9,8 @@ class RuleEngine:
 
     def __init__(self):
         self.dispatcher = ActionDispatcher()
-        self.processed_events = set()
 
     def evaluate_problem(self, event):
-
-        if event.event_id in self.processed_events:
-            print(f"[RULE_ENGINE] Event {event.event_id} already processed")
-            return
-
-        self.processed_events.add(event.event_id)
 
         # 1) separar cliente y host
         client, host = rule_loader.extract_client_and_host(event.host)
@@ -45,6 +38,26 @@ class RuleEngine:
                 message=f"Runbook not found for client: {client}",
                 details={"client": client, "host": host},
             )
+            persistence_service.mark_event_processed(event.event_id, "PROBLEM")
+            return
+
+        except Exception as e:
+            print(f"[ERROR] RuleEngine problem evaluation failed: {e}")
+            persistence_service.mark_event_failed(
+                event.event_id,
+                "PROBLEM",
+                str(e),
+            )
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="ERROR",
+                component="rule_engine",
+                message="Problem evaluation failed",
+                details={"error": str(e)},
+            )
+            return
+
+        persistence_service.mark_event_processed(event.event_id, "PROBLEM")
 
     def _evaluate_problem_with_runbook(self, event, client, host):
 
@@ -318,6 +331,25 @@ class RuleEngine:
             contacts_payload=contacts_payload,
             scheduled_at=scheduled_at,
         )
+
+        if result.get("success") and result.get("duplicate"):
+            print(
+                "[RULE_ENGINE] Scheduled action already exists | "
+                f"event_id={event.event_id} | "
+                f"dedupe_key={result.get('dedupe_key')}"
+            )
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="INFO",
+                component="rule_engine",
+                message="Scheduled action already exists",
+                details={
+                    "event_id": event.event_id,
+                    "scheduled_action_id": result.get("scheduled_action_id"),
+                    "dedupe_key": result.get("dedupe_key"),
+                },
+            )
+            return
 
         if result.get("success"):
             print(

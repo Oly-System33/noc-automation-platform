@@ -1,6 +1,5 @@
 import os
 import threading
-import time
 
 from dotenv import load_dotenv
 
@@ -23,6 +22,14 @@ class ScheduledActionWorker:
         self.batch_size = self._get_int_env(
             "SCHEDULED_ACTION_BATCH_SIZE",
             20,
+        )
+        self.processing_timeout_minutes = self._get_int_env(
+            "SCHEDULED_ACTION_PROCESSING_TIMEOUT_MINUTES",
+            10,
+        )
+        self.max_attempts = self._get_int_env(
+            "SCHEDULED_ACTION_MAX_ATTEMPTS",
+            3,
         )
         self._stop_event = threading.Event()
 
@@ -57,6 +64,18 @@ class ScheduledActionWorker:
         print("[SCHEDULED_WORKER] Stopped")
 
     def run_once(self):
+
+        recovery = persistence_service.recover_stale_scheduled_actions(
+            timeout_minutes=self.processing_timeout_minutes,
+            max_attempts=self.max_attempts,
+        )
+
+        if recovery.get("recovered") or recovery.get("failed"):
+            print(
+                "[SCHEDULED_WORKER] Recovered stale actions | "
+                f"recovered={recovery.get('recovered')} | "
+                f"failed={recovery.get('failed')}"
+            )
 
         scheduled_actions = persistence_service.get_due_scheduled_actions(
             self.batch_size

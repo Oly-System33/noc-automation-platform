@@ -62,15 +62,51 @@ class EventProcessor:
             )
             return None
 
-        status = str(event.status)
+        status = persistence_service.normalize_zabbix_status(event.status)
 
-        if status in ("1", "PROBLEM"):
+        if status not in ("PROBLEM", "RECOVERY"):
+            return None
+
+        claim = persistence_service.claim_event_processing(
+            event=event,
+            zabbix_status=status,
+            client=client,
+            host=host,
+        )
+
+        if not claim.get("success"):
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="ERROR",
+                component="event_processor",
+                message="Event processing claim failed",
+                details={"status": status, "error": claim.get("error")},
+            )
+            return None
+
+        if not claim.get("is_new"):
+            print(
+                "[INFO] Duplicate event ignored | "
+                f"event_id={event.event_id} | status={status}"
+            )
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="INFO",
+                component="event_processor",
+                message="Duplicate event ignored",
+                details={
+                    "status": status,
+                    "state": claim.get("state"),
+                    "received_count": claim.get("received_count"),
+                },
+            )
+            return None
+
+        if status == "PROBLEM":
             return self._handle_problem(event)
 
-        elif status in ("0", "RECOVERY"):
+        elif status == "RECOVERY":
             return self._handle_recovery(event)
-
-        return None
 
     def _handle_problem(self, event: ZabbixEvent) -> dict:
         """
@@ -144,6 +180,7 @@ class EventProcessor:
                 message="Recovery without previous problem",
                 details={"incident_closed": incident_closed},
             )
+            persistence_service.mark_event_processed(event.event_id, "RECOVERY")
             return None
 
         duration = event.duration or "unknown"
@@ -161,6 +198,7 @@ class EventProcessor:
         )
 
         del self.active_events[event.event_id]
+        persistence_service.mark_event_processed(event.event_id, "RECOVERY")
 
         return {
             "type": "RECOVERY",

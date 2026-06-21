@@ -1,12 +1,13 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.db.models import (
     ActionRecord,
     AuditLogRecord,
     EventRecord,
     IncidentRecord,
+    ProcessedEventRecord,
     ScheduledActionRecord,
 )
 from app.db.session import SessionLocal
@@ -17,6 +18,18 @@ class PersistenceService:
     def _now(self):
 
         return datetime.now(timezone.utc)
+
+    def normalize_zabbix_status(self, status):
+
+        status = str(status)
+
+        if status in ("1", "PROBLEM"):
+            return "PROBLEM"
+
+        if status in ("0", "RECOVERY"):
+            return "RECOVERY"
+
+        return status
 
     def _safe_value(self, value):
 
@@ -212,9 +225,142 @@ class PersistenceService:
 
         return self._run(operation)
 
+    def claim_event_processing(self, event, zabbix_status, client, host):
+
+        zabbix_status = self.normalize_zabbix_status(zabbix_status)
+        session = SessionLocal()
+
+        try:
+            record = ProcessedEventRecord(
+                event_id=getattr(event, "event_id", None),
+                zabbix_status=zabbix_status,
+                client=client,
+                host=host,
+                trigger=getattr(event, "trigger", None),
+                severity=getattr(event, "severity", None),
+                state="processing",
+                first_seen_at=self._now(),
+                last_seen_at=self._now(),
+                received_count=1,
+                processing_started_at=self._now(),
+            )
+            session.add(record)
+            session.commit()
+
+            return {
+                "success": True,
+                "is_new": True,
+                "state": record.state,
+                "received_count": record.received_count,
+                "error": None,
+            }
+
+        except IntegrityError:
+            session.rollback()
+
+            existing = (
+                session.query(ProcessedEventRecord)
+                .filter(ProcessedEventRecord.event_id == getattr(event, "event_id", None))
+                .filter(ProcessedEventRecord.zabbix_status == zabbix_status)
+                .one_or_none()
+            )
+
+            if existing:
+                existing.received_count = (existing.received_count or 0) + 1
+                existing.last_seen_at = self._now()
+                existing.client = client or existing.client
+                existing.host = host or existing.host
+                session.commit()
+
+                return {
+                    "success": True,
+                    "is_new": False,
+                    "state": existing.state,
+                    "received_count": existing.received_count,
+                    "error": None,
+                }
+
+            return {
+                "success": False,
+                "is_new": False,
+                "state": None,
+                "received_count": None,
+                "error": "Duplicate event detected but existing record was not found",
+            }
+
+        except Exception as e:
+            session.rollback()
+            print(f"[ERROR] Database operation failed: {e}")
+            return {
+                "success": False,
+                "is_new": False,
+                "state": None,
+                "received_count": None,
+                "error": str(e),
+            }
+
+        finally:
+            session.close()
+
+    def mark_event_processed(self, event_id, zabbix_status):
+
+        zabbix_status = self.normalize_zabbix_status(zabbix_status)
+
+        def operation(session):
+            updated = (
+                session.query(ProcessedEventRecord)
+                .filter(ProcessedEventRecord.event_id == event_id)
+                .filter(ProcessedEventRecord.zabbix_status == zabbix_status)
+                .update({
+                    "state": "processed",
+                    "processed_at": self._now(),
+                    "error_message": None,
+                })
+            )
+
+            return updated == 1
+
+        return bool(self._run(operation))
+
+    def mark_event_failed(self, event_id, zabbix_status, error_message):
+
+        zabbix_status = self.normalize_zabbix_status(zabbix_status)
+
+        def operation(session):
+            updated = (
+                session.query(ProcessedEventRecord)
+                .filter(ProcessedEventRecord.event_id == event_id)
+                .filter(ProcessedEventRecord.zabbix_status == zabbix_status)
+                .update({
+                    "state": "failed",
+                    "error_message": error_message,
+                })
+            )
+
+            return updated == 1
+
+        return bool(self._run(operation))
+
+    def build_scheduled_action_dedupe_key(self, event_id, trigger_group, target, actions):
+
+        normalized_actions = sorted(str(action).strip().lower() for action in actions or [])
+
+        return "|".join([
+            str(event_id or ""),
+            str(trigger_group or ""),
+            str(target or ""),
+            ",".join(normalized_actions),
+        ])
+
     def create_scheduled_action(self, event, client, host, trigger_group, actions, target, contacts_payload, scheduled_at):
 
         session = SessionLocal()
+        dedupe_key = self.build_scheduled_action_dedupe_key(
+            event_id=getattr(event, "event_id", None),
+            trigger_group=trigger_group,
+            target=target,
+            actions=actions,
+        )
 
         try:
             record = ScheduledActionRecord(
@@ -226,9 +372,11 @@ class PersistenceService:
                 severity=getattr(event, "severity", None),
                 actions=self._safe_value(actions),
                 target=target,
+                dedupe_key=dedupe_key,
                 contacts_payload=self._safe_value(contacts_payload),
                 scheduled_at=scheduled_at,
                 state="pending",
+                attempt_count=0,
             )
             session.add(record)
             session.flush()
@@ -238,12 +386,32 @@ class PersistenceService:
                 "scheduled_action_id": record.id,
                 "scheduled_at": scheduled_at.isoformat() if scheduled_at else None,
                 "state": record.state,
+                "duplicate": False,
+                "dedupe_key": dedupe_key,
                 "error": None,
             }
 
             session.commit()
 
             return response
+
+        except IntegrityError:
+            session.rollback()
+            existing = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.dedupe_key == dedupe_key)
+                .one_or_none()
+            )
+
+            return {
+                "success": True,
+                "scheduled_action_id": existing.id if existing else None,
+                "scheduled_at": existing.scheduled_at.isoformat() if existing and existing.scheduled_at else None,
+                "state": existing.state if existing else None,
+                "duplicate": True,
+                "dedupe_key": dedupe_key,
+                "error": None,
+            }
 
         except SQLAlchemyError as e:
             session.rollback()
@@ -253,6 +421,8 @@ class PersistenceService:
                 "scheduled_action_id": None,
                 "scheduled_at": None,
                 "state": None,
+                "duplicate": False,
+                "dedupe_key": dedupe_key,
                 "error": str(e),
             }
 
@@ -264,6 +434,8 @@ class PersistenceService:
                 "scheduled_action_id": None,
                 "scheduled_at": None,
                 "state": None,
+                "duplicate": False,
+                "dedupe_key": dedupe_key,
                 "error": str(e),
             }
 
@@ -309,6 +481,8 @@ class PersistenceService:
             "scheduled_at": record.scheduled_at,
             "state": record.state,
             "created_at": record.created_at,
+            "attempt_count": record.attempt_count,
+            "dedupe_key": record.dedupe_key,
         }
 
     def claim_scheduled_action(self, scheduled_action_id):
@@ -318,7 +492,11 @@ class PersistenceService:
                 session.query(ScheduledActionRecord)
                 .filter(ScheduledActionRecord.id == scheduled_action_id)
                 .filter(ScheduledActionRecord.state == "pending")
-                .update({"state": "processing"})
+                .update({
+                    "state": "processing",
+                    "processing_started_at": self._now(),
+                    "attempt_count": ScheduledActionRecord.attempt_count + 1,
+                })
             )
 
             return updated == 1
@@ -354,7 +532,9 @@ class PersistenceService:
                 .update({
                     "state": "executed",
                     "executed_at": self._now(),
+                    "processing_started_at": None,
                     "error_message": None,
+                    "last_error": None,
                 })
             )
 
@@ -372,6 +552,8 @@ class PersistenceService:
                 .update({
                     "state": "failed",
                     "error_message": error_message,
+                    "last_error": error_message,
+                    "processing_started_at": None,
                 })
             )
 
@@ -390,6 +572,7 @@ class PersistenceService:
                     "state": "cancelled",
                     "cancelled_at": self._now(),
                     "cancel_reason": reason,
+                    "processing_started_at": None,
                 })
             )
 
@@ -413,6 +596,7 @@ class PersistenceService:
                     "state": "cancelled",
                     "cancelled_at": self._now(),
                     "cancel_reason": reason,
+                    "processing_started_at": None,
                 })
             )
 
@@ -424,6 +608,85 @@ class PersistenceService:
             session.rollback()
             print(f"[ERROR] Database operation failed: {e}")
             return {"success": False, "count": 0, "error": str(e)}
+
+        finally:
+            session.close()
+
+    def recover_stale_scheduled_actions(self, timeout_minutes, max_attempts):
+
+        session = SessionLocal()
+        cutoff = self._now() - timedelta(minutes=timeout_minutes)
+
+        try:
+            stale_records = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.state == "processing")
+                .filter(ScheduledActionRecord.processing_started_at <= cutoff)
+                .all()
+            )
+
+            recovered = 0
+            failed = 0
+
+            for record in stale_records:
+                if (record.attempt_count or 0) < max_attempts:
+                    record.state = "pending"
+                    record.processing_started_at = None
+                    record.last_error = "Recovered stale processing action"
+                    recovered += 1
+                else:
+                    record.state = "failed"
+                    record.processing_started_at = None
+                    record.error_message = "Max attempts exceeded after stale processing"
+                    record.last_error = record.error_message
+                    failed += 1
+
+            session.commit()
+
+            return {"success": True, "recovered": recovered, "failed": failed, "error": None}
+
+        except Exception as e:
+            session.rollback()
+            print(f"[ERROR] Database operation failed: {e}")
+            return {"success": False, "recovered": 0, "failed": 0, "error": str(e)}
+
+        finally:
+            session.close()
+
+    def get_startup_summary(self, scheduled_timeout_minutes=10, event_timeout_minutes=10):
+
+        session = SessionLocal()
+        now = self._now()
+        scheduled_cutoff = now - timedelta(minutes=scheduled_timeout_minutes)
+        event_cutoff = now - timedelta(minutes=event_timeout_minutes)
+
+        try:
+            return {
+                "open_incidents": session.query(IncidentRecord).filter(IncidentRecord.current_status == "open").count(),
+                "pending_scheduled": session.query(ScheduledActionRecord).filter(ScheduledActionRecord.state == "pending").count(),
+                "due_scheduled": (
+                    session.query(ScheduledActionRecord)
+                    .filter(ScheduledActionRecord.state == "pending")
+                    .filter(ScheduledActionRecord.scheduled_at <= now)
+                    .count()
+                ),
+                "stuck_scheduled": (
+                    session.query(ScheduledActionRecord)
+                    .filter(ScheduledActionRecord.state == "processing")
+                    .filter(ScheduledActionRecord.processing_started_at <= scheduled_cutoff)
+                    .count()
+                ),
+                "stuck_events": (
+                    session.query(ProcessedEventRecord)
+                    .filter(ProcessedEventRecord.state == "processing")
+                    .filter(ProcessedEventRecord.processing_started_at <= event_cutoff)
+                    .count()
+                ),
+            }
+
+        except Exception as e:
+            print(f"[ERROR] Database operation failed: {e}")
+            return None
 
         finally:
             session.close()

@@ -75,6 +75,7 @@ docker exec -it noc-postgres psql -U noc_engine -d noc_engine
 
 ```sql
 SELECT * FROM events ORDER BY created_at DESC;
+SELECT * FROM processed_events ORDER BY created_at DESC;
 SELECT * FROM incidents ORDER BY created_at DESC;
 SELECT * FROM actions ORDER BY created_at DESC;
 SELECT * FROM audit_logs ORDER BY created_at DESC;
@@ -127,6 +128,8 @@ Set these values in `.env`:
 SCHEDULED_ACTION_WORKER_ENABLED=true
 SCHEDULED_ACTION_POLL_INTERVAL_SECONDS=5
 SCHEDULED_ACTION_BATCH_SIZE=20
+SCHEDULED_ACTION_PROCESSING_TIMEOUT_MINUTES=10
+SCHEDULED_ACTION_MAX_ATTEMPTS=3
 ```
 
 Then start the app normally:
@@ -139,6 +142,12 @@ DATABASE_URL=postgresql://noc_engine:noc_engine@localhost:5432/noc_engine \
 With that setup, a PROBLEM with `delay_minutes > 0` is scheduled and the same app process polls and executes it after `scheduled_at`.
 
 The worker uses `pending -> processing` before execution to avoid duplicate execution if more than one process sees the same row.
+If the app stops while a scheduled action is `processing`, the next startup/worker cycle recovers stale rows:
+
+- `attempt_count < SCHEDULED_ACTION_MAX_ATTEMPTS`: `processing -> pending`
+- `attempt_count >= SCHEDULED_ACTION_MAX_ATTEMPTS`: `processing -> failed`
+
+Webhook deduplication is handled by PostgreSQL in `processed_events`. The `events` table still stores every raw webhook received, including duplicates.
 
 For debugging, you can still run the worker manually in another terminal by setting `SCHEDULED_ACTION_WORKER_ENABLED=false` for the app and using:
 
@@ -211,7 +220,49 @@ FROM audit_logs
 ORDER BY created_at DESC;
 ```
 
-## 11. Docker Compose
+## 11. Verify Persistent Deduplication
+
+Send the same PROBLEM webhook twice with the same `event_id`.
+
+Expected:
+
+- `events` has multiple rows for the same `event_id`;
+- `processed_events` has one `PROBLEM` row with `received_count > 1`;
+- actions or scheduled actions are not duplicated.
+
+Queries:
+
+```sql
+SELECT event_id, status, created_at
+FROM events
+WHERE event_id = 'manual-dedupe-1'
+ORDER BY created_at;
+
+SELECT event_id, zabbix_status, state, received_count, first_seen_at, last_seen_at
+FROM processed_events
+WHERE event_id = 'manual-dedupe-1'
+ORDER BY zabbix_status;
+
+SELECT event_id, action_type, status, created_at
+FROM actions
+WHERE event_id = 'manual-dedupe-1'
+ORDER BY created_at;
+
+SELECT event_id, state, dedupe_key, created_at
+FROM scheduled_actions
+WHERE event_id = 'manual-dedupe-1'
+ORDER BY created_at;
+```
+
+Send PROBLEM and RECOVERY with the same `event_id`.
+
+Expected:
+
+- `processed_events` has one `PROBLEM` row and one `RECOVERY` row;
+- the incident is closed;
+- pending scheduled actions are cancelled.
+
+## 12. Docker Compose
 
 The compose file includes a `postgres` service and `postgres_data` volume. To run the full stack:
 

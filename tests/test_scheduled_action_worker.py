@@ -1,6 +1,7 @@
 import unittest
 
 from app.models.event_model import ZabbixEvent
+from app.services.persistence_service import PersistenceService
 from app.services.action_dispatcher import ActionDispatcher
 from app.services.scheduled_action_worker import ScheduledActionWorker
 
@@ -65,6 +66,46 @@ class ScheduledActionWorkerTest(unittest.TestCase):
         self.assertEqual(event.client, "Banco X")
         self.assertEqual(event.parsed_host, "test-noc")
         self.assertEqual(event.trigger_group, "availability")
+
+
+class PersistenceIdempotencyHelpersTest(unittest.TestCase):
+
+    def setUp(self):
+        self.service = PersistenceService()
+
+    def test_normalize_zabbix_status(self):
+        cases = [
+            ("1", "PROBLEM"),
+            (1, "PROBLEM"),
+            ("PROBLEM", "PROBLEM"),
+            ("0", "RECOVERY"),
+            (0, "RECOVERY"),
+            ("RECOVERY", "RECOVERY"),
+        ]
+
+        for value, expected in cases:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    self.service.normalize_zabbix_status(value),
+                    expected,
+                )
+
+    def test_scheduled_action_dedupe_key_is_stable(self):
+        first = self.service.build_scheduled_action_dedupe_key(
+            event_id="event-1",
+            trigger_group="availability",
+            target="noc",
+            actions=["jira", "calls"],
+        )
+        second = self.service.build_scheduled_action_dedupe_key(
+            event_id="event-1",
+            trigger_group="availability",
+            target="noc",
+            actions=["CALLS", "Jira"],
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(first, "event-1|availability|noc|calls,jira")
 
 
 if __name__ == "__main__":

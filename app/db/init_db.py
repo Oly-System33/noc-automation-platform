@@ -4,6 +4,7 @@ from app.db.models import (  # noqa: F401
     AuditLogRecord,
     EventRecord,
     IncidentRecord,
+    ProcessedEventRecord,
     ScheduledActionRecord,
 )
 from app.db.session import DATABASE_URL, engine, sanitize_database_url
@@ -16,9 +17,46 @@ def init_db():
 
     with engine.begin() as connection:
         connection.execute(text(
+            "ALTER TABLE scheduled_actions "
+            "ADD COLUMN IF NOT EXISTS dedupe_key VARCHAR"
+        ))
+        connection.execute(text(
+            "ALTER TABLE scheduled_actions "
+            "ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMP WITH TIME ZONE"
+        ))
+        connection.execute(text(
+            "ALTER TABLE scheduled_actions "
+            "ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0"
+        ))
+        connection.execute(text(
+            "ALTER TABLE scheduled_actions "
+            "ADD COLUMN IF NOT EXISTS last_error TEXT"
+        ))
+        connection.execute(text(
             "CREATE INDEX IF NOT EXISTS "
             "ix_scheduled_actions_state_scheduled_at "
             "ON scheduled_actions (state, scheduled_at)"
+        ))
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS "
+            "ix_scheduled_actions_state_processing_started_at "
+            "ON scheduled_actions (state, processing_started_at)"
+        ))
+        connection.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_scheduled_actions_dedupe_key "
+            "ON scheduled_actions (dedupe_key) "
+            "WHERE dedupe_key IS NOT NULL"
+        ))
+        connection.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_processed_events_event_status "
+            "ON processed_events (event_id, zabbix_status)"
+        ))
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS "
+            "ix_processed_events_state_processing_started_at "
+            "ON processed_events (state, processing_started_at)"
         ))
 
 
