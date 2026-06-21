@@ -3,6 +3,7 @@ import os
 import re
 import smtplib
 from email.mime.text import MIMEText
+from app.services.alert_message_builder import AlertMessageBuilder
 from app.services.incident_service import IncidentService
 from app.services.call_service import call_service
 from app.services.console import console
@@ -118,7 +119,120 @@ class ActionDispatcher:
             },
         )
 
-    def dispatch(self, event, actions: list, contacts: list):
+    def build_dispatch_context(self, event):
+
+        client, host, _ = self._event_context(event)
+
+        return {
+            "event_id": event.event_id,
+            "alert": {
+                "client": client,
+                "host": host,
+                "trigger": event.trigger,
+                "severity": event.severity,
+                "status": event.status,
+                "timestamp": getattr(event, "timestamp", None),
+            },
+            "jira": {
+                "attempted": False,
+                "success": False,
+                "issue_key": None,
+                "project_key": None,
+                "url": None,
+                "error": None,
+            },
+            "telegram": {"attempted": False, "success": False, "target": None, "error": None},
+            "teams": {"attempted": False, "success": False, "target": None, "error": None},
+            "calls": {
+                "attempted": False,
+                "success": False,
+                "attempt_count": 0,
+                "phone": None,
+                "call_uuid": None,
+                "confirmed": False,
+                "confirmed_at": None,
+                "error": None,
+            },
+            "email_summary": {"recipients": [], "sent": False, "error": None},
+        }
+
+    def order_execution_actions(self, actions):
+
+        priority = {
+            "jira": 0,
+            "telegram": 1,
+            "teams": 2,
+            "calls": 3,
+        }
+
+        return sorted(
+            actions or [],
+            key=lambda action: priority.get(action, 100),
+        )
+
+    def _update_context_from_result(self, context, result):
+
+        if not context or not result:
+
+            return
+
+        action = result.get("action")
+
+        if action == "jira":
+            context["jira"].update({
+                "attempted": True,
+                "success": bool(result.get("success")),
+                "issue_key": result.get("issue_key"),
+                "project_key": result.get("project_key"),
+                "url": result.get("url"),
+                "error": result.get("error"),
+            })
+
+        elif action == "telegram":
+            context["telegram"].update({
+                "attempted": True,
+                "success": bool(result.get("success")),
+                "target": result.get("target"),
+                "error": result.get("error"),
+            })
+
+        elif action == "teams":
+            context["teams"].update({
+                "attempted": True,
+                "success": bool(result.get("success")),
+                "target": result.get("target"),
+                "error": result.get("error"),
+            })
+
+        elif action == "calls":
+            context["calls"].update({
+                "attempted": True,
+                "success": bool(result.get("success")),
+                "attempt_count": result.get("attempt_count", 0),
+                "phone": result.get("phone"),
+                "call_uuid": result.get("call_uuid"),
+                "confirmed": bool(result.get("confirmed")),
+                "confirmed_at": result.get("confirmed_at"),
+                "error": result.get("error"),
+            })
+
+        elif action == "email_summary":
+            context["email_summary"].update({
+                "recipients": result.get("recipients", []),
+                "sent": bool(result.get("sent")),
+                "error": result.get("error"),
+            })
+
+    def _jira_log_context(self, context):
+
+        jira = (context or {}).get("jira") or {}
+
+        return bool(jira.get("success")), jira.get("issue_key")
+
+    def dispatch(self, event, actions: list, contacts: list, context=None):
+
+        context = context or self.build_dispatch_context(event)
+        actions = self.order_execution_actions(actions)
 
         print(f"\n[{console.cyan('DISPATCHER')}] Starting action dispatch...")
         print(
@@ -147,9 +261,13 @@ class ActionDispatcher:
                     handler,
                     action,
                     event,
-                    contacts
+                    contacts,
+                    context,
                 )
                 results.extend(action_results)
+
+                for result in action_results:
+                    self._update_context_from_result(context, result)
 
             except Exception as e:
                 print(
@@ -172,14 +290,15 @@ class ActionDispatcher:
         return {
             "success": all(result["success"] for result in results) if results else True,
             "results": results,
+            "context": context,
         }
 
-    def _dispatch_single_action(self, handler, action, event, contacts):
+    def _dispatch_single_action(self, handler, action, event, contacts, context):
 
         results = []
 
         for contact in contacts:
-            result = handler(event, contact)
+            result = handler(event, contact, context)
 
             if isinstance(result, dict):
                 result.setdefault("action", action)
@@ -214,7 +333,7 @@ class ActionDispatcher:
                 msg.as_string()
             )
 
-    def send_email_summary(self, event, recipients, action_results):
+    def send_email_summary(self, event, recipients, action_results, context=None):
 
         recipients = self.normalize_email_recipients(recipients)
 
@@ -235,7 +354,7 @@ class ActionDispatcher:
             }
 
         subject = f"[NOC RESUMEN] {event.host} - PROBLEM"
-        body = self._build_email_summary_body(event, action_results)
+        body = AlertMessageBuilder(event, context).email_summary_body(action_results)
 
         try:
             self._send_email_message(recipients, subject, body)
@@ -257,96 +376,31 @@ class ActionDispatcher:
                 "error": str(e),
             }
 
-        print(f"[EMAIL] {console.green('Resumen enviado correctamente')} -> {recipients}")
+        includes_ticket, issue_key = self._jira_log_context(context)
+        print(
+            f"[EMAIL] {console.green('Resumen enviado correctamente')} -> {recipients} | "
+            f"incluye_ticket={str(includes_ticket).lower()} | issue_key={issue_key}"
+        )
         self._record_action(event, "email_summary", recipients, "success")
-        return {
+        result = {
             "action": "email_summary",
             "success": True,
             "sent": True,
             "recipients": recipients,
         }
 
+        self._update_context_from_result(context, result)
+        return result
+
     def _build_email_summary_body(self, event, action_results):
 
-        client, host, trigger_group = self._event_context(event)
-        lines = [
-            "Resumen operativo de alerta NOC",
-            "",
-            f"Cliente: {client}",
-            f"Host: {host}",
-            f"Trigger: {event.trigger}",
-            f"Severidad: {event.severity}",
-            "Estado: PROBLEM",
-            f"Event ID: {event.event_id}",
-        ]
-
-        if getattr(event, "timestamp", None):
-            lines.append(f"Fecha/hora evento: {event.timestamp}")
-
-        if trigger_group:
-            lines.append(f"Grupo de trigger: {trigger_group}")
-
-        lines.extend(["", "Acciones realizadas:"])
-        added_action = False
-
-        for result in action_results or []:
-
-            if not result.get("success"):
-
-                continue
-
-            action = result.get("action")
-
-            if action == "jira" and result.get("issue_key"):
-                line = f"- Ticket Jira creado: {result.get('issue_key')}"
-
-                if result.get("project_key"):
-                    line += f" | Proyecto: {result.get('project_key')}"
-
-                if result.get("url"):
-                    line += f" | URL: {result.get('url')}"
-
-                lines.append(line)
-                added_action = True
-
-            elif action == "calls":
-                lines.append(
-                    "- Llamada realizada: "
-                    f"telefono={result.get('phone')} | "
-                    f"intentos={result.get('attempt_count', 1)} | "
-                    f"estado={result.get('status') or 'desconocido'} | "
-                    f"confirmada={'si' if result.get('confirmed') else 'no'}"
-                )
-
-                if result.get("confirmed_at"):
-                    lines.append(f"  Confirmada en: {result.get('confirmed_at')}")
-
-                if result.get("answered_at"):
-                    lines.append(f"  Atendida en: {result.get('answered_at')}")
-
-                if result.get("call_uuid"):
-                    lines.append(f"  Call UUID: {result.get('call_uuid')}")
-
-                added_action = True
-
-            elif action == "telegram":
-                lines.append("- Telegram enviado correctamente")
-                added_action = True
-
-            elif action == "teams":
-                lines.append("- Teams enviado correctamente")
-                added_action = True
-
-        if not added_action:
-            lines.append("- No se registraron acciones operativas exitosas para informar.")
-
-        return "\n".join(lines)
+        return AlertMessageBuilder(event).email_summary_body(action_results)
 
     # ========================
     # ACTION HANDLERS
     # ========================
 
-    def _action_email(self, event, contact):
+    def _action_email(self, event, contact, context=None):
 
         if isinstance(contact, str):
             recipient = contact
@@ -404,7 +458,7 @@ class ActionDispatcher:
             "recipients": recipients,
         }
 
-    def _action_telegram(self, event, contact):
+    def _action_telegram(self, event, contact, context=None):
 
         chat_id = contact.get("telegram")
 
@@ -413,15 +467,7 @@ class ActionDispatcher:
             self._record_action(event, "telegram", contact, "skipped", error_message="No telegram defined for contact")
             return {"action": "telegram", "success": False, "status": "skipped"}
 
-        status = self._normalize_status(event.status)
-
-        message = (
-            f"🚨 ALERTA NOC\n"
-            f"Host: {event.host}\n"
-            f"Trigger: {event.trigger}\n"
-            f"Severity: {event.severity}\n"
-            f"Status: {status}"
-        )
+        message = AlertMessageBuilder(event, context).telegram_message()
 
         if not self.telegram_bot_token:
             print(f"[{console.level('WARNING')}] No TELEGRAM_BOT_TOKEN_NOC defined")
@@ -459,7 +505,11 @@ class ActionDispatcher:
             )
             return {"action": "telegram", "success": False, "status": "failed"}
 
-        print(f"[DISPATCH][TELEGRAM] {console.green('enviado correctamente')} -> {chat_id}")
+        includes_ticket, issue_key = self._jira_log_context(context)
+        print(
+            f"[TELEGRAM] {console.green('Mensaje enviado')} | "
+            f"incluye_ticket={str(includes_ticket).lower()} | issue_key={issue_key}"
+        )
         self._record_action(event, "telegram", chat_id, "success", response={"http_status": response.status_code})
         return {
             "action": "telegram",
@@ -468,7 +518,7 @@ class ActionDispatcher:
             "target": chat_id,
         }
 
-    def _action_calls(self, event, contact):
+    def _action_calls(self, event, contact, context=None):
 
         phone = contact.get("phone")
 
@@ -483,9 +533,14 @@ class ActionDispatcher:
             f"[DISPATCH][CALL] "
             f"{console.cyan('Iniciando llamada Vonage')} | phone={phone}"
         )
+        includes_ticket, issue_key = self._jira_log_context(context)
+        print(
+            "[CALL] Speech preparado | "
+            f"incluye_ticket={str(includes_ticket).lower()} | issue_key={issue_key}"
+        )
 
         try:
-            result = self.call_service.notify_event_by_call(event, phone)
+            result = self.call_service.notify_event_by_call(event, phone, context=context)
 
         except Exception as e:
             print(f"[{console.level('ERROR')}] Vonage call failed: {e}")
@@ -521,7 +576,7 @@ class ActionDispatcher:
             "final_reason": (resolved or {}).get("final_reason"),
         }
 
-    def _action_jira(self, event, contact):
+    def _action_jira(self, event, contact, context=None):
 
         project_key = contact.get("jira_project")
 
@@ -589,9 +644,8 @@ class ActionDispatcher:
 
         if response.get("success"):
             print(
-                f"[DISPATCH][JIRA] "
-                f"{console.green('Ticket creado correctamente')}: "
-                f"{response.get('issue_key')}"
+                f"[JIRA] {console.green('Ticket creado correctamente')} | "
+                f"issue_key={response.get('issue_key')}"
             )
             self._record_action(event, "jira", project_key, "success", response=response)
             jira_url = None
@@ -626,7 +680,7 @@ class ActionDispatcher:
         )
         return {"action": "jira", "success": False, "status": "failed"}
 
-    def _action_teams(self, event, contact):
+    def _action_teams(self, event, contact, context=None):
 
         teams_destination = contact.get("teams")
 
@@ -637,15 +691,8 @@ class ActionDispatcher:
 
         print(f"[DISPATCH][TEAMS->EMAIL] {console.cyan('enviando')} -> {teams_destination}")
 
-        status = self._normalize_status(event.status)
-        subject = f"[NOC ALERT][TEAMS] {event.host} - {status}"
-        body = (
-            f"Host: {event.host}\n"
-            f"Trigger: {event.trigger}\n"
-            f"Severity: {event.severity}\n"
-            f"Status: {status}\n"
-            f"Event ID: {event.event_id}"
-        )
+        subject = f"[NOC ALERT][TEAMS] {event.host} - PROBLEM"
+        body = AlertMessageBuilder(event, context).teams_message()
         recipients = self.normalize_email_recipients([teams_destination])
 
         if not recipients:
@@ -662,6 +709,11 @@ class ActionDispatcher:
             return {"action": "teams", "success": False, "status": "failed"}
 
         if recipients:
+            includes_ticket, issue_key = self._jira_log_context(context)
+            print(
+                f"[TEAMS] {console.green('Mensaje enviado')} | "
+                f"incluye_ticket={str(includes_ticket).lower()} | issue_key={issue_key}"
+            )
             self._record_action(event, "teams", teams_destination, "success")
             return {
                 "action": "teams",

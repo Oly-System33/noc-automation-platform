@@ -220,6 +220,7 @@ class ScheduledActionWorker:
         execution_actions = contacts_payload.get("execution_actions")
         summary_recipients = contacts_payload.get("summary_recipients") or []
         results = []
+        context = self.dispatcher.build_dispatch_context(event)
 
         if not summary_recipients and contacts_payload.get("merged_email_recipients"):
             summary_recipients = self.dispatcher.normalize_email_recipients([
@@ -228,6 +229,8 @@ class ScheduledActionWorker:
 
         if execution_actions is None:
             execution_actions = [action for action in actions if action != "email"]
+
+        execution_actions = self.dispatcher.order_execution_actions(execution_actions)
 
         if execution_actions and not target_contact and "email" not in actions:
             print(
@@ -241,13 +244,16 @@ class ScheduledActionWorker:
                 event=event,
                 actions=execution_actions,
                 contacts=[target_contact],
+                context=context,
             )
             results.extend(other_result.get("results", []))
+            context = other_result.get("context", context)
 
         email_result = self.dispatcher.send_email_summary(
             event=event,
             recipients=summary_recipients,
             action_results=results,
+            context=context,
         )
         results.append(email_result)
 

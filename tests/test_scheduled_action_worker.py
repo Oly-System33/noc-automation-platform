@@ -11,7 +11,7 @@ class ActionDispatcherResultTest(unittest.TestCase):
     def test_dispatch_returns_success_summary(self):
         dispatcher = ActionDispatcher()
         dispatcher.ACTION_MAP = {
-            "ok": lambda event, contact: True,
+            "ok": lambda event, contact, context=None: True,
         }
         event = ZabbixEvent(
             host="client/host",
@@ -29,7 +29,7 @@ class ActionDispatcherResultTest(unittest.TestCase):
     def test_dispatch_returns_failure_summary(self):
         dispatcher = ActionDispatcher()
         dispatcher.ACTION_MAP = {
-            "fail": lambda event, contact: False,
+            "fail": lambda event, contact, context=None: False,
         }
         event = ZabbixEvent(
             host="client/host",
@@ -130,14 +130,22 @@ class ScheduledActionWorkerTest(unittest.TestCase):
 
         class FakeDispatcher:
 
-            def dispatch(self, event, actions, contacts):
+            def build_dispatch_context(self, event):
+                return {"jira": {"success": False}}
+
+            def order_execution_actions(self, actions):
+                priority = {"jira": 0, "telegram": 1, "teams": 2, "calls": 3}
+                return sorted(actions, key=lambda action: priority.get(action, 100))
+
+            def dispatch(self, event, actions, contacts, context=None):
                 calls.append(("dispatch", actions, contacts))
                 return {
                     "success": True,
                     "results": [{"action": "jira", "success": True, "issue_key": "NOC-1"}],
+                    "context": {"jira": {"success": True, "issue_key": "NOC-1"}},
                 }
 
-            def send_email_summary(self, event, recipients, action_results):
+            def send_email_summary(self, event, recipients, action_results, context=None):
                 calls.append(("summary", recipients, action_results))
                 return {
                     "action": "email_summary",
@@ -155,10 +163,10 @@ class ScheduledActionWorkerTest(unittest.TestCase):
             "severity": "High",
             "trigger_group": "availability",
             "created_at": "2026-06-20T10:00:00",
-            "actions": ["email", "jira"],
+            "actions": ["email", "telegram", "jira"],
             "contacts_payload": {
                 "target_contact": {"jira_project": "NOC"},
-                "execution_actions": ["jira"],
+                "execution_actions": ["telegram", "jira"],
                 "summary_recipients": ["noc@example.com"],
             },
         }
@@ -167,7 +175,7 @@ class ScheduledActionWorkerTest(unittest.TestCase):
 
         self.assertTrue(result["success"])
         self.assertEqual(calls[0][0], "dispatch")
-        self.assertEqual(calls[0][1], ["jira"])
+        self.assertEqual(calls[0][1], ["jira", "telegram"])
         self.assertEqual(calls[1][0], "summary")
         self.assertEqual(calls[1][1], ["noc@example.com"])
         self.assertEqual(calls[1][2][0]["issue_key"], "NOC-1")

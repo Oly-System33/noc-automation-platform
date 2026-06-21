@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from app.integrations.vonage_voice import VonageVoiceClient
+from app.services.alert_message_builder import AlertMessageBuilder
 from app.rules.rule_loader import rule_loader
 
 
@@ -13,6 +14,7 @@ class CallService:
     def __init__(self, voice_client=None):
         self.voice_client = voice_client
         self.active_events = {}
+        self.active_contexts = {}
         self.active_calls = {}
         self._lock = threading.Lock()
 
@@ -73,11 +75,12 @@ class CallService:
             if key != "event"
         }
 
-    def notify_event_by_call(self, event, phone):
+    def notify_event_by_call(self, event, phone, context=None):
         if not event.event_id:
             raise ValueError("Cannot create call for event without event_id")
 
         self.active_events[event.event_id] = event
+        self.active_contexts[event.event_id] = context or {}
 
         with self._lock:
             self.active_calls[event.event_id] = self._create_call_state(event, phone)
@@ -178,10 +181,24 @@ class CallService:
         if not event:
             return "Alerta del NOC no encontrada."
 
-        return self.build_message(event)
+        context = self.active_contexts.get(event_id)
 
-    def build_message(self, event):
+        return self.build_message(event, context)
+
+    def build_message(self, event, context=None):
         client, host = rule_loader.extract_client_and_host(event.host)
+
+        if context:
+            speech = AlertMessageBuilder(event, context).call_speech()
+            jira = context.get("jira") or {}
+            includes_ticket = bool(jira.get("success") and jira.get("issue_key"))
+            print(
+                "[CALL] Speech generado | "
+                f"incluye_ticket={str(includes_ticket).lower()} | "
+                f"issue_key={jira.get('issue_key')}"
+            )
+
+            return speech
 
         return (
             "Alerta crítica del NOC. "

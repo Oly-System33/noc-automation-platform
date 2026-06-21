@@ -257,10 +257,10 @@ class RuleEngine:
             target_contact=target_contact,
             include_target_email=email_requested or target_contact_source == "oncall",
         )
-        execution_actions = [
+        execution_actions = self.dispatcher.order_execution_actions([
             a for a in action["action"]
             if a != "email"
-        ]
+        ])
 
         return {
             "event": event,
@@ -299,6 +299,7 @@ class RuleEngine:
         execution_actions = contacts["execution_actions"]
         target_contact = contacts["target_contact"]
         results = []
+        context = self.dispatcher.build_dispatch_context(event)
 
         if execution_actions and not target_contact and not contacts["email_requested"]:
             print(
@@ -312,15 +313,18 @@ class RuleEngine:
             dispatch_result = self.dispatcher.dispatch(
                 event=event,
                 actions=execution_actions,
-                contacts=[target_contact]
+                contacts=[target_contact],
+                context=context,
             )
             results.extend(dispatch_result.get("results", []))
+            context = dispatch_result.get("context", context)
 
         if str(event.status) in ("1", "PROBLEM"):
             email_result = self.dispatcher.send_email_summary(
                 event=event,
                 recipients=contacts["summary_recipients"],
                 action_results=results,
+                context=context,
             )
             results.append(email_result)
 
