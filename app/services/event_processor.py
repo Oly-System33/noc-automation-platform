@@ -1,6 +1,7 @@
 from typing import Dict, Optional
 from app.models.event_model import ZabbixEvent
 from app.rules.rule_loader import rule_loader
+from app.services.console import console
 from app.services.persistence_service import persistence_service
 
 
@@ -41,7 +42,7 @@ class EventProcessor:
         )
 
         if event.event_id is None:
-            print("[WARNING] Evento sin event_id, ignorado")
+            print(f"[{console.level('WARNING')}] Evento sin event_id, ignorado")
             persistence_service.record_audit_log(
                 event_id=None,
                 level="WARNING",
@@ -52,7 +53,7 @@ class EventProcessor:
             return None
 
         if event.timestamp is None:
-            print("[WARNING] Evento sin timestamp, ignorado")
+            print(f"[{console.level('WARNING')}] Evento sin timestamp, ignorado")
             persistence_service.record_audit_log(
                 event_id=event.event_id,
                 level="WARNING",
@@ -86,7 +87,8 @@ class EventProcessor:
 
         if not claim.get("is_new"):
             print(
-                "[INFO] Duplicate event ignored | "
+                f"[{console.level('INFO')}] "
+                f"{console.yellow('Webhook duplicado ignorado')} | "
                 f"event_id={event.event_id} | status={status}"
             )
             persistence_service.record_audit_log(
@@ -133,7 +135,7 @@ class EventProcessor:
             },
         )
 
-        print(f"[PROBLEM] {event.host} - {event.trigger}")
+        print(f"[{console.status('PROBLEM')}] {event.host} - {event.trigger}")
 
         return {
             "type": "PROBLEM",
@@ -159,6 +161,13 @@ class EventProcessor:
             reason="recovery_received",
         )
 
+        if cancelled_actions.get("count"):
+            print(
+                f"[{console.status('RECOVERY')}] "
+                f"{console.green('acciones pendientes canceladas')} | "
+                f"event_id={event.event_id} | count={cancelled_actions.get('count')}"
+            )
+
         persistence_service.record_audit_log(
             event_id=event.event_id,
             level="INFO" if cancelled_actions.get("success") else "ERROR",
@@ -172,7 +181,11 @@ class EventProcessor:
         )
 
         if not problem_event:
-            print(f"[WARNING] RECOVERY sin PROBLEM previo: {event.event_id}")
+            print(
+                f"[{console.level('WARNING')}] "
+                f"{console.status('RECOVERY')} sin {console.status('PROBLEM')} "
+                f"previo: {event.event_id}"
+            )
             persistence_service.record_audit_log(
                 event_id=event.event_id,
                 level="WARNING",
@@ -194,7 +207,8 @@ class EventProcessor:
         )
 
         print(
-            f"[RECOVERY] {event.host} - duración total: {duration}"
+            f"[{console.status('RECOVERY')}] "
+            f"{event.host} - duración total: {duration}"
         )
 
         del self.active_events[event.event_id]

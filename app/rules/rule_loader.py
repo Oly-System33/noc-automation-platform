@@ -6,6 +6,8 @@ from datetime import datetime, time
 from zoneinfo import ZoneInfo
 import pandas as pd
 
+from app.services.console import console
+
 
 RUNBOOKS_PATH = Path(os.getenv("RUNBOOKS_PATH", "data/runbooks"))
 
@@ -76,11 +78,17 @@ class RuleLoader:
         host_value = str(full_host).strip() if full_host is not None else ""
 
         if not host_value:
-            print("[WARNING] Invalid or empty host received, using unknown/unknown")
+            print(
+                f"[{console.level('WARNING')}] "
+                "Invalid or empty host received, using unknown/unknown"
+            )
             return "unknown", "unknown"
 
         if "/" not in host_value:
-            print("[WARNING] Host without client received, using client=unknown")
+            print(
+                f"[{console.level('WARNING')}] "
+                "Host without client received, using client=unknown"
+            )
             return "unknown", host_value or "unknown"
 
         client, host = host_value.split("/", 1)
@@ -88,7 +96,10 @@ class RuleLoader:
         host = host.strip() or "unknown"
 
         if client == "unknown":
-            print("[WARNING] Host without client received, using client=unknown")
+            print(
+                f"[{console.level('WARNING')}] "
+                "Host without client received, using client=unknown"
+            )
 
         return client, host
 
@@ -408,7 +419,7 @@ class RuleLoader:
         }
 
         if "day" in oncall_df.columns and not required_columns.issubset(oncall_df.columns):
-            print("[ONCALL] legacy day-based format detected")
+            print(f"[{console.cyan('ONCALL')}] legacy day-based format detected")
             return None
 
         if not required_columns.issubset(oncall_df.columns):

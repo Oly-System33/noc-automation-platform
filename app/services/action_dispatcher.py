@@ -4,6 +4,7 @@ import smtplib
 from email.mime.text import MIMEText
 from app.services.incident_service import IncidentService
 from app.services.call_service import call_service
+from app.services.console import console
 from app.services.persistence_service import persistence_service
 from app.rules.rule_loader import rule_loader
 from dotenv import load_dotenv
@@ -98,10 +99,10 @@ class ActionDispatcher:
 
     def dispatch(self, event, actions: list, contacts: list):
 
-        print("\n[DISPATCHER] Starting action dispatch...")
+        print(f"\n[{console.cyan('DISPATCHER')}] Starting action dispatch...")
         print(
-            f"[EVENT] {event.event_id} | "
-            f"{event.status} | "
+            f"[{console.cyan('EVENT')}] {event.event_id} | "
+            f"{console.status(event.status)} | "
             f"{event.host}"
         )
 
@@ -112,7 +113,7 @@ class ActionDispatcher:
             handler = self.ACTION_MAP.get(action)
 
             if not handler:
-                print(f"[WARNING] Unknown action type: {action}")
+                print(f"[{console.level('WARNING')}] Unknown action type: {action}")
                 results.append({
                     "action": action,
                     "success": False,
@@ -131,7 +132,7 @@ class ActionDispatcher:
 
             except Exception as e:
                 print(
-                    f"[ERROR] Failed executing action "
+                    f"[{console.level('ERROR')}] Failed executing action "
                     f"'{action}': {e}"
                 )
                 self._record_action(
@@ -178,7 +179,7 @@ class ActionDispatcher:
             recipient = contact.get("email")
 
         if not recipient:
-            print("[WARNING] No email defined for contact")
+            print(f"[{console.level('WARNING')}] No email defined for contact")
             self._record_action(event, "email", contact, "skipped", error_message="No email defined for contact")
             return False
 
@@ -226,11 +227,11 @@ class ActionDispatcher:
 
         except Exception as e:
 
-            print(f"[ERROR] Email send failed: {e}")
+            print(f"[{console.level('ERROR')}] Error SMTP / Email send failed: {e}")
             self._record_action(event, "email", recipient, "failed", error_message=str(e))
             return False
 
-        print(f"[DISPATCH][EMAIL] → {recipients}")
+        print(f"[DISPATCH][EMAIL] {console.green('enviado correctamente')} -> {recipients}")
         self._record_action(event, "email", recipients, "success")
         return True
 
@@ -239,7 +240,7 @@ class ActionDispatcher:
         chat_id = contact.get("telegram")
 
         if not chat_id:
-            print("[WARNING] No telegram defined for contact")
+            print(f"[{console.level('WARNING')}] No telegram defined for contact")
             self._record_action(event, "telegram", contact, "skipped", error_message="No telegram defined for contact")
             return False
 
@@ -254,7 +255,7 @@ class ActionDispatcher:
         )
 
         if not self.telegram_bot_token:
-            print("[WARNING] No TELEGRAM_BOT_TOKEN_NOC defined")
+            print(f"[{console.level('WARNING')}] No TELEGRAM_BOT_TOKEN_NOC defined")
             self._record_action(event, "telegram", chat_id, "skipped", error_message="No TELEGRAM_BOT_TOKEN_NOC defined")
             return False
 
@@ -273,12 +274,12 @@ class ActionDispatcher:
 
         except requests.exceptions.RequestException as e:
 
-            print(f"[ERROR] Telegram connection error: {e}")
+            print(f"[{console.level('ERROR')}] Telegram connection error: {e}")
             self._record_action(event, "telegram", chat_id, "failed", error_message=str(e))
             return False
 
         if response.status_code != 200:
-            print(f"[ERROR] Telegram send failed: {response.text}")
+            print(f"[{console.level('ERROR')}] Telegram send failed: {response.text}")
             self._record_action(
                 event,
                 "telegram",
@@ -289,7 +290,7 @@ class ActionDispatcher:
             )
             return False
 
-        print(f"[DISPATCH][TELEGRAM] → {chat_id}")
+        print(f"[DISPATCH][TELEGRAM] {console.green('enviado correctamente')} -> {chat_id}")
         self._record_action(event, "telegram", chat_id, "success", response={"http_status": response.status_code})
         return True
 
@@ -298,22 +299,27 @@ class ActionDispatcher:
         phone = contact.get("phone")
 
         if not phone or phone != phone:
-            print("[WARNING] No phone defined for contact")
+            print(f"[{console.level('WARNING')}] No phone defined for contact")
             self._record_action(event, "calls", contact, "skipped", error_message="No phone defined for contact")
             return False
 
         phone = self._normalize_phone_number(phone)
 
+        print(
+            f"[DISPATCH][CALL] "
+            f"{console.cyan('Iniciando llamada Vonage')} | phone={phone}"
+        )
+
         try:
             result = self.call_service.notify_event_by_call(event, phone)
 
         except Exception as e:
-            print(f"[ERROR] Vonage call failed: {e}")
+            print(f"[{console.level('ERROR')}] Vonage call failed: {e}")
             self._record_action(event, "calls", phone, "failed", error_message=str(e))
             return False
 
         print(
-            "[DISPATCH][CALL] Vonage call created → "
+            f"[DISPATCH][CALL] {console.cyan('Vonage call created')} -> "
             f"phone={phone} | "
             f"uuid={result.get('uuid')} | "
             f"status={result.get('status')}"
@@ -326,7 +332,7 @@ class ActionDispatcher:
         project_key = contact.get("jira_project")
 
         if not project_key:
-            print("[WARNING] No jira_project defined")
+            print(f"[{console.level('WARNING')}] No jira_project defined")
             self._record_action(event, "jira", contact, "skipped", error_message="No jira_project defined")
             return False
 
@@ -342,8 +348,14 @@ class ActionDispatcher:
                 event.severity
             )
 
-        print(f"[DEBUG] Creating Jira ticket in project: {project_key}")
-        print(f"[DEBUG] Jira priority resolved: {jira_priority}")
+        console.log(
+            "DEBUG",
+            f"[{console.level('DEBUG')}] Creating Jira ticket in project: {project_key}",
+        )
+        console.log(
+            "DEBUG",
+            f"[{console.level('DEBUG')}] Jira priority resolved: {jira_priority}",
+        )
 
         summary = f"{event.trigger} - {host}"
 
@@ -367,6 +379,11 @@ class ActionDispatcher:
         if request_type != request_type:
             request_type = None
 
+        print(
+            f"[DISPATCH][JIRA] "
+            f"{console.cyan('Creando ticket')} | project={project_key}"
+        )
+
         response = self.incident_service.create_incident(
             project_key=project_key,
             summary=summary,
@@ -377,12 +394,16 @@ class ActionDispatcher:
         )
 
         if response.get("success"):
-            print(f"[DISPATCH][JIRA] Ticket creado: {response.get('issue_key')}")
+            print(
+                f"[DISPATCH][JIRA] "
+                f"{console.green('Ticket creado correctamente')}: "
+                f"{response.get('issue_key')}"
+            )
             self._record_action(event, "jira", project_key, "success", response=response)
             return True
 
         print(
-            "[ERROR] Jira ticket creation failed | "
+            f"[{console.level('ERROR')}] Error Jira / ticket creation failed | "
             f"status={response.get('status')} | "
             f"error={response.get('error')}"
         )
@@ -401,11 +422,11 @@ class ActionDispatcher:
         teams_destination = contact.get("teams")
 
         if not teams_destination:
-            print("[WARNING] No teams destination defined")
+            print(f"[{console.level('WARNING')}] No teams destination defined")
             self._record_action(event, "teams", contact, "skipped", error_message="No teams destination defined")
             return False
 
-        print(f"[DISPATCH][TEAMS→EMAIL] → {teams_destination}")
+        print(f"[DISPATCH][TEAMS->EMAIL] {console.cyan('enviando')} -> {teams_destination}")
 
         # reutiliza el transporte SMTP existente
         if self._action_email(event, teams_destination):

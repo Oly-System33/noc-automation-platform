@@ -11,6 +11,7 @@ from app.db.models import (
     ScheduledActionRecord,
 )
 from app.db.session import SessionLocal
+from app.services.console import console
 
 
 class PersistenceService:
@@ -83,12 +84,12 @@ class PersistenceService:
 
         except SQLAlchemyError as e:
             session.rollback()
-            print(f"[ERROR] Database operation failed: {e}")
+            print(f"[{console.level('ERROR')}] Database operation failed: {e}")
             return None
 
         except Exception as e:
             session.rollback()
-            print(f"[ERROR] Database operation failed: {e}")
+            print(f"[{console.level('ERROR')}] Database operation failed: {e}")
             return None
 
         finally:
@@ -290,7 +291,7 @@ class PersistenceService:
 
         except Exception as e:
             session.rollback()
-            print(f"[ERROR] Database operation failed: {e}")
+            print(f"[{console.level('ERROR')}] Database operation failed: {e}")
             return {
                 "success": False,
                 "is_new": False,
@@ -415,7 +416,7 @@ class PersistenceService:
 
         except SQLAlchemyError as e:
             session.rollback()
-            print(f"[ERROR] Database operation failed: {e}")
+            print(f"[{console.level('ERROR')}] Database operation failed: {e}")
             return {
                 "success": False,
                 "scheduled_action_id": None,
@@ -428,7 +429,7 @@ class PersistenceService:
 
         except Exception as e:
             session.rollback()
-            print(f"[ERROR] Database operation failed: {e}")
+            print(f"[{console.level('ERROR')}] Database operation failed: {e}")
             return {
                 "success": False,
                 "scheduled_action_id": None,
@@ -459,7 +460,7 @@ class PersistenceService:
             return [self._scheduled_action_to_dict(record) for record in records]
 
         except Exception as e:
-            print(f"[ERROR] Database operation failed: {e}")
+            print(f"[{console.level('ERROR')}] Database operation failed: {e}")
             return []
 
         finally:
@@ -606,7 +607,7 @@ class PersistenceService:
 
         except Exception as e:
             session.rollback()
-            print(f"[ERROR] Database operation failed: {e}")
+            print(f"[{console.level('ERROR')}] Database operation failed: {e}")
             return {"success": False, "count": 0, "error": str(e)}
 
         finally:
@@ -647,7 +648,7 @@ class PersistenceService:
 
         except Exception as e:
             session.rollback()
-            print(f"[ERROR] Database operation failed: {e}")
+            print(f"[{console.level('ERROR')}] Database operation failed: {e}")
             return {"success": False, "recovered": 0, "failed": 0, "error": str(e)}
 
         finally:
@@ -685,7 +686,7 @@ class PersistenceService:
             }
 
         except Exception as e:
-            print(f"[ERROR] Database operation failed: {e}")
+            print(f"[{console.level('ERROR')}] Database operation failed: {e}")
             return None
 
         finally:

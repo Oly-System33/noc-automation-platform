@@ -8,6 +8,7 @@ from app.db.models import (  # noqa: F401
     ScheduledActionRecord,
 )
 from app.db.session import DATABASE_URL, engine, sanitize_database_url
+from app.services.console import console
 from sqlalchemy import text
 
 
@@ -65,12 +66,12 @@ if __name__ == "__main__":
         init_db()
     except Exception as e:
         print(
-            "[ERROR] Database initialization failed | "
+            f"[{console.level('ERROR')}] Database initialization failed | "
             f"database={sanitize_database_url(DATABASE_URL)} | error={e}"
         )
         raise SystemExit(1)
 
     print(
-        "[DATABASE] Tables initialized successfully | "
+        f"[{console.green('DATABASE')}] Tables initialized successfully | "
         f"database={sanitize_database_url(DATABASE_URL)}"
     )

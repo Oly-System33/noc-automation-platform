@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.rules.rule_loader import rule_loader
 from app.services.action_dispatcher import ActionDispatcher
+from app.services.console import console
 from app.services.persistence_service import persistence_service
 
 
@@ -17,7 +18,7 @@ class RuleEngine:
         event.client = client
         event.parsed_host = host
 
-        print(f"[RULE_ENGINE] Cliente: {client} | Host: {host}")
+        print(f"[{console.cyan('RULE_ENGINE')}] Cliente: {client} | Host: {host}")
         persistence_service.record_audit_log(
             event_id=event.event_id,
             level="INFO",
@@ -30,7 +31,7 @@ class RuleEngine:
             self._evaluate_problem_with_runbook(event, client, host)
         except FileNotFoundError:
             event.unprocessable_event = True
-            print(f"[WARNING] Runbook not found for client: {client}")
+            print(f"[{console.level('WARNING')}] Runbook not found for client: {client}")
             persistence_service.record_audit_log(
                 event_id=event.event_id,
                 level="WARNING",
@@ -42,7 +43,7 @@ class RuleEngine:
             return
 
         except Exception as e:
-            print(f"[ERROR] RuleEngine problem evaluation failed: {e}")
+            print(f"[{console.level('ERROR')}] RuleEngine problem evaluation failed: {e}")
             persistence_service.mark_event_failed(
                 event.event_id,
                 "PROBLEM",
@@ -64,7 +65,7 @@ class RuleEngine:
         # 2) verificar host monitoreado
         if not rule_loader.is_host_monitored(client, host):
 
-            print("[INFO] Host no monitoreado")
+            print(f"[{console.level('INFO')}] Host no monitoreado")
             persistence_service.record_audit_log(
                 event_id=event.event_id,
                 level="INFO",
@@ -87,7 +88,7 @@ class RuleEngine:
 
             else:
 
-                print("[WARNING] No baseline contact definido")
+                print(f"[{console.level('WARNING')}] No baseline contact definido")
 
             return
 
@@ -97,7 +98,7 @@ class RuleEngine:
             event.trigger
         )
 
-        print(f"[INFO] Trigger group detectado: {trigger_group}")
+        print(f"[{console.level('INFO')}] Trigger group detectado: {trigger_group}")
         event.trigger_group = trigger_group
         persistence_service.update_event_context(
             event_id=event.event_id,
@@ -122,7 +123,7 @@ class RuleEngine:
         # 4) verificar suppressions
         if rule_loader.is_suppressed(client, host, trigger_group):
 
-            print("[INFO] Evento suprimido por regla horaria")
+            print(f"[{console.level('INFO')}] {console.yellow('Evento suprimido por regla horaria')}")
             persistence_service.record_audit_log(
                 event_id=event.event_id,
                 level="INFO",
@@ -142,7 +143,7 @@ class RuleEngine:
 
         if not action:
 
-            print("[INFO] No hay acción adicional definida")
+            print(f"[{console.level('INFO')}] No hay acción adicional definida")
             persistence_service.record_audit_log(
                 event_id=event.event_id,
                 level="INFO",
@@ -163,7 +164,7 @@ class RuleEngine:
 
             else:
 
-                print("[WARNING] No baseline contact definido")
+                print(f"[{console.level('WARNING')}] No baseline contact definido")
 
             return
 
@@ -172,7 +173,7 @@ class RuleEngine:
 
         if action.get("invalid_actions"):
             print(
-                "[WARNING] Invalid runbook actions ignored | "
+                f"[{console.level('WARNING')}] Invalid runbook actions ignored | "
                 f"actions={action.get('invalid_actions')}"
             )
             persistence_service.record_audit_log(
@@ -191,7 +192,7 @@ class RuleEngine:
             )
 
         if not action.get("action"):
-            print("[WARNING] No valid runbook actions found")
+            print(f"[{console.level('WARNING')}] No valid runbook actions found")
             persistence_service.record_audit_log(
                 event_id=event.event_id,
                 level="WARNING",
@@ -209,7 +210,7 @@ class RuleEngine:
             return
 
         if action.get("delay_minutes_invalid"):
-            print("[WARNING] Invalid delay_minutes, using 0")
+            print(f"[{console.level('WARNING')}] Invalid delay_minutes, using 0")
             persistence_service.record_audit_log(
                 event_id=event.event_id,
                 level="WARNING",
@@ -372,7 +373,8 @@ class RuleEngine:
 
         if result.get("success") and result.get("duplicate"):
             print(
-                "[RULE_ENGINE] Scheduled action already exists | "
+                f"[{console.cyan('RULE_ENGINE')}] "
+                f"{console.yellow('Scheduled action already exists')} | "
                 f"event_id={event.event_id} | "
                 f"dedupe_key={result.get('dedupe_key')}"
             )
@@ -391,7 +393,8 @@ class RuleEngine:
 
         if result.get("success"):
             print(
-                "[RULE_ENGINE] Action scheduled | "
+                f"[{console.cyan('RULE_ENGINE')}] "
+                f"{console.cyan('Action scheduled')} | "
                 f"event_id={event.event_id} | "
                 f"delay_minutes={delay_minutes} | "
                 f"scheduled_at={result.get('scheduled_at')}"
@@ -413,7 +416,7 @@ class RuleEngine:
             return
 
         print(
-            "[ERROR] Failed to schedule action | "
+            f"[{console.level('ERROR')}] Failed to schedule action | "
             f"event_id={event.event_id} | "
             f"error={result.get('error')}"
         )
@@ -435,7 +438,8 @@ class RuleEngine:
         event.parsed_host = host
 
         print(
-            f"[RULE_ENGINE] Incidente cerrado: {host} "
+            f"[{console.cyan('RULE_ENGINE')}] "
+            f"{console.green('Incidente cerrado')}: {host} "
             f"(duración: {duration})"
         )
         persistence_service.record_audit_log(

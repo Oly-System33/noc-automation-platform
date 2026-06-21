@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from app.api.vonage_webhook import router as vonage_router
 from app.api.zabbix_webhook import router as zabbix_router
+from app.services.console import console
 from app.services.persistence_service import persistence_service
 from app.services.scheduled_action_worker import (
     is_worker_enabled,
@@ -37,16 +38,16 @@ def print_startup_summary():
     )
 
     if not summary:
-        print("[STARTUP] Database summary unavailable")
+        print(f"[{console.cyan('STARTUP')}] Database summary unavailable")
         return
 
     print(
-        "[STARTUP] "
+        f"[{console.cyan('STARTUP')}] "
         f"open_incidents={summary['open_incidents']} | "
         f"pending_scheduled={summary['pending_scheduled']} | "
-        f"due_scheduled={summary['due_scheduled']} | "
-        f"stuck_scheduled={summary['stuck_scheduled']} | "
-        f"stuck_events={summary['stuck_events']}"
+        f"due_scheduled={console.yellow(summary['due_scheduled']) if summary['due_scheduled'] else summary['due_scheduled']} | "
+        f"stuck_scheduled={console.orange(summary['stuck_scheduled']) if summary['stuck_scheduled'] else summary['stuck_scheduled']} | "
+        f"stuck_events={console.orange(summary['stuck_events']) if summary['stuck_events'] else summary['stuck_events']}"
     )
 
 
@@ -59,7 +60,8 @@ def start_scheduled_action_worker():
     )
     if recovery.get("recovered") or recovery.get("failed"):
         print(
-            "[STARTUP] Recovered stale scheduled actions | "
+            f"[{console.cyan('STARTUP')}] "
+            f"{console.orange('Recovered stale scheduled actions')} | "
             f"recovered={recovery.get('recovered')} | "
             f"failed={recovery.get('failed')}"
         )

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.services.call_service import call_service
+from app.services.console import console
 
 
 router = APIRouter()
@@ -92,7 +93,7 @@ async def vonage_input(request: Request, event_id: str = Query(...)):
     digit = _extract_digit(payload)
 
     if digit == "1":
-        print(f"[CALL CONFIRMED] event_id={event_id}")
+        print(f"[{console.green('CALL CONFIRMED')}] {console.green('Llamada confirmada')} | event_id={event_id}")
 
         return JSONResponse(
             content=[
@@ -126,6 +127,20 @@ async def vonage_event(request: Request, event_id: str = Query(...)):
         if key in payload
     }
 
-    print(f"[VONAGE][EVENT] event_id={event_id} payload={summary}")
+    status = str(summary.get("status", "")).lower()
+
+    if status in ("failed", "busy", "timeout", "rejected", "unanswered"):
+        status_text = console.orange(status or "unknown")
+    elif status in ("answered", "completed"):
+        status_text = console.cyan(status)
+    elif status in ("ringing", "started"):
+        status_text = console.cyan(status)
+    else:
+        status_text = status or "unknown"
+
+    print(
+        f"[VONAGE][EVENT] event_id={event_id} | "
+        f"status={status_text} | payload={summary}"
+    )
 
     return {"status": "ok"}

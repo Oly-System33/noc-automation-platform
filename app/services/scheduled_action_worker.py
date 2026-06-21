@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 
 from app.models.event_model import ZabbixEvent
 from app.services.action_dispatcher import ActionDispatcher
+from app.services.console import console
 from app.services.persistence_service import persistence_service
 
 
@@ -48,7 +49,7 @@ class ScheduledActionWorker:
     def run_forever(self):
 
         print(
-            "[SCHEDULED_WORKER] Started | "
+            f"[{console.cyan('SCHEDULED_WORKER')}] Started | "
             f"poll_interval={self.poll_interval}s | "
             f"batch_size={self.batch_size}"
         )
@@ -57,11 +58,11 @@ class ScheduledActionWorker:
             try:
                 self.run_once()
             except Exception as e:
-                print(f"[ERROR] Scheduled worker cycle failed: {e}")
+                print(f"[{console.level('ERROR')}] Scheduled worker cycle failed: {e}")
 
             self._stop_event.wait(self.poll_interval)
 
-        print("[SCHEDULED_WORKER] Stopped")
+        print(f"[{console.cyan('SCHEDULED_WORKER')}] Stopped")
 
     def run_once(self):
 
@@ -72,7 +73,8 @@ class ScheduledActionWorker:
 
         if recovery.get("recovered") or recovery.get("failed"):
             print(
-                "[SCHEDULED_WORKER] Recovered stale actions | "
+                f"[{console.cyan('SCHEDULED_WORKER')}] "
+                f"{console.orange('Recovered stale actions')} | "
                 f"recovered={recovery.get('recovered')} | "
                 f"failed={recovery.get('failed')}"
             )
@@ -88,6 +90,12 @@ class ScheduledActionWorker:
 
         scheduled_action_id = scheduled_action["id"]
         event_id = scheduled_action.get("event_id")
+
+        print(
+            f"[{console.cyan('SCHEDULED_WORKER')}] "
+            f"{console.cyan('Processing scheduled action')} | "
+            f"scheduled_action_id={scheduled_action_id} | event_id={event_id}"
+        )
 
         persistence_service.record_audit_log(
             event_id=event_id,
@@ -130,6 +138,11 @@ class ScheduledActionWorker:
             persistence_service.mark_scheduled_action_executed(
                 scheduled_action_id
             )
+            print(
+                f"[{console.cyan('SCHEDULED_WORKER')}] "
+                f"{console.green('Scheduled action executed')} | "
+                f"scheduled_action_id={scheduled_action_id} | event_id={event_id}"
+            )
             persistence_service.record_audit_log(
                 event_id=event_id,
                 level="INFO",
@@ -153,6 +166,12 @@ class ScheduledActionWorker:
             scheduled_action_id,
             reason=reason,
         )
+        print(
+            f"[{console.cyan('SCHEDULED_WORKER')}] "
+            f"{console.yellow('Scheduled action cancelled')} | "
+            f"scheduled_action_id={scheduled_action_id} | "
+            f"event_id={event_id} | reason={reason}"
+        )
         persistence_service.record_audit_log(
             event_id=event_id,
             level="INFO",
@@ -173,6 +192,12 @@ class ScheduledActionWorker:
         persistence_service.mark_scheduled_action_failed(
             scheduled_action_id,
             error,
+        )
+        print(
+            f"[{console.cyan('SCHEDULED_WORKER')}] "
+            f"{console.orange('Scheduled action failed')} | "
+            f"scheduled_action_id={scheduled_action_id} | "
+            f"event_id={event_id} | error={error}"
         )
         persistence_service.record_audit_log(
             event_id=event_id,
