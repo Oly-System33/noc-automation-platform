@@ -44,6 +44,64 @@ class ActionDispatcherResultTest(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertFalse(result["results"][0]["success"])
 
+    def test_normalize_email_recipients_dedupes_common_separators(self):
+        dispatcher = ActionDispatcher()
+
+        recipients = dispatcher.normalize_email_recipients([
+            " NOC@example.com;guardia@example.com ",
+            "noc@example.com|otro@example.com, Guardia@Example.com",
+        ])
+
+        self.assertEqual(
+            recipients,
+            ["noc@example.com", "guardia@example.com", "otro@example.com"],
+        )
+
+    def test_email_summary_body_only_includes_successful_actions(self):
+        dispatcher = ActionDispatcher()
+        event = ZabbixEvent(
+            host="client/host",
+            trigger="trigger",
+            severity="High",
+            status="1",
+            event_id="summary-body",
+            timestamp="2026-06-21T12:00:00Z",
+        )
+        event.client = "client"
+        event.parsed_host = "host"
+        event.trigger_group = "availability"
+
+        body = dispatcher._build_email_summary_body(
+            event,
+            [
+                {
+                    "action": "jira",
+                    "success": True,
+                    "issue_key": "NOC-1",
+                    "project_key": "NOC",
+                },
+                {
+                    "action": "telegram",
+                    "success": False,
+                    "error": "technical failure",
+                },
+                {
+                    "action": "calls",
+                    "success": True,
+                    "phone": "54911",
+                    "attempt_count": 1,
+                    "status": "confirmed",
+                    "confirmed": True,
+                },
+            ],
+        )
+
+        self.assertIn("NOC-1", body)
+        self.assertIn("Llamada realizada", body)
+        self.assertIn("confirmada=si", body)
+        self.assertNotIn("technical failure", body)
+        self.assertNotIn("Telegram enviado", body)
+
 
 class ScheduledActionWorkerTest(unittest.TestCase):
 
@@ -66,6 +124,53 @@ class ScheduledActionWorkerTest(unittest.TestCase):
         self.assertEqual(event.client, "Banco X")
         self.assertEqual(event.parsed_host, "test-noc")
         self.assertEqual(event.trigger_group, "availability")
+
+    def test_worker_executes_actions_before_single_email_summary(self):
+        calls = []
+
+        class FakeDispatcher:
+
+            def dispatch(self, event, actions, contacts):
+                calls.append(("dispatch", actions, contacts))
+                return {
+                    "success": True,
+                    "results": [{"action": "jira", "success": True, "issue_key": "NOC-1"}],
+                }
+
+            def send_email_summary(self, event, recipients, action_results):
+                calls.append(("summary", recipients, action_results))
+                return {
+                    "action": "email_summary",
+                    "success": True,
+                    "sent": True,
+                    "recipients": recipients,
+                }
+
+        worker = ScheduledActionWorker(dispatcher=FakeDispatcher())
+        scheduled_action = {
+            "event_id": "event-1",
+            "client": "Banco X",
+            "host": "test-noc",
+            "trigger": "Zabbix agent unavailable",
+            "severity": "High",
+            "trigger_group": "availability",
+            "created_at": "2026-06-20T10:00:00",
+            "actions": ["email", "jira"],
+            "contacts_payload": {
+                "target_contact": {"jira_project": "NOC"},
+                "execution_actions": ["jira"],
+                "summary_recipients": ["noc@example.com"],
+            },
+        }
+
+        result = worker._execute_scheduled_action(scheduled_action)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(calls[0][0], "dispatch")
+        self.assertEqual(calls[0][1], ["jira"])
+        self.assertEqual(calls[1][0], "summary")
+        self.assertEqual(calls[1][1], ["noc@example.com"])
+        self.assertEqual(calls[1][2][0]["issue_key"], "NOC-1")
 
 
 class PersistenceIdempotencyHelpersTest(unittest.TestCase):

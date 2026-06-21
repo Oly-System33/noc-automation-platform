@@ -93,6 +93,7 @@ async def vonage_input(request: Request, event_id: str = Query(...)):
     digit = _extract_digit(payload)
 
     if digit == "1":
+        call_service.mark_confirmed(event_id)
         print(f"[{console.green('CALL CONFIRMED')}] {console.green('Llamada confirmada')} | event_id={event_id}")
 
         return JSONResponse(
@@ -126,6 +127,7 @@ async def vonage_event(request: Request, event_id: str = Query(...)):
         for key in summary_keys
         if key in payload
     }
+    call_service.update_call_event(event_id, payload)
 
     status = str(summary.get("status", "")).lower()
 

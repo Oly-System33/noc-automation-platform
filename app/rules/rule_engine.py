@@ -75,21 +75,6 @@ class RuleEngine:
             )
 
             event.unmanaged_host = True
-
-            baseline_contact = rule_loader.get_contact(client, "baseline")
-
-            if baseline_contact and baseline_contact.get("email"):
-
-                self.dispatcher.dispatch(
-                    event=event,
-                    actions=["email"],
-                    contacts=[baseline_contact.get("email")]
-                )
-
-            else:
-
-                print(f"[{console.level('WARNING')}] No baseline contact definido")
-
             return
 
         # 3) clasificar trigger
@@ -151,20 +136,6 @@ class RuleEngine:
                 message="No additional action defined",
                 details={"trigger_group": trigger_group},
             )
-
-            baseline_contact = rule_loader.get_contact(client, "baseline")
-
-            if baseline_contact and baseline_contact.get("email"):
-
-                self.dispatcher.dispatch(
-                    event=event,
-                    actions=["email"],
-                    contacts=[baseline_contact.get("email")]
-                )
-
-            else:
-
-                print(f"[{console.level('WARNING')}] No baseline contact definido")
 
             return
 
@@ -234,9 +205,11 @@ class RuleEngine:
 
         baseline_contact = rule_loader.get_contact(client, "baseline")
 
+        target_contact_source = "oncall"
         target_contact = rule_loader.get_oncall_contact(client, team)
 
         if not target_contact:
+            target_contact_source = "contact"
             target_contact = rule_loader.get_contact(client, team)
 
         # inyectar jira_project, jira_issue_type, jira_request_type desde hoja actions
@@ -266,6 +239,7 @@ class RuleEngine:
             target=team,
             baseline_contact=baseline_contact,
             target_contact=target_contact,
+            target_contact_source=target_contact_source,
             delay_minutes=delay_minutes,
         )
 
@@ -275,23 +249,15 @@ class RuleEngine:
 
         self._execute_action_plan(action_plan)
 
-    def _build_action_plan(self, event, client, host, trigger_group, action, target, baseline_contact, target_contact, delay_minutes):
+    def _build_action_plan(self, event, client, host, trigger_group, action, target, baseline_contact, target_contact, target_contact_source, delay_minutes):
 
-        email_recipients = []
-
-        baseline_email = baseline_contact.get(
-            "email") if baseline_contact else None
-        target_email = target_contact.get("email") if target_contact else None
-
-        # limpiar NaN provenientes de pandas
-        if baseline_email and baseline_email == baseline_email:
-            email_recipients.append(str(baseline_email))
-
-        if target_email and target_email == target_email:
-            email_recipients.append(str(target_email))
-
-        merged_recipients = ";".join(email_recipients) if email_recipients else None
-        other_actions = [
+        email_requested = "email" in action["action"]
+        summary_recipients = self._resolve_summary_recipients(
+            baseline_contact=baseline_contact,
+            target_contact=target_contact,
+            include_target_email=email_requested or target_contact_source == "oncall",
+        )
+        execution_actions = [
             a for a in action["action"]
             if a != "email"
         ]
@@ -306,38 +272,62 @@ class RuleEngine:
             "contacts": {
                 "baseline_contact": baseline_contact,
                 "target_contact": target_contact,
-                "email_recipients": email_recipients,
-                "merged_email_recipients": merged_recipients,
-                "other_actions": other_actions,
+                "target_contact_source": target_contact_source,
+                "summary_recipients": summary_recipients,
+                "email_requested": email_requested,
+                "execution_actions": execution_actions,
             },
             "delay_minutes": delay_minutes,
         }
+
+    def _resolve_summary_recipients(self, baseline_contact, target_contact, include_target_email):
+
+        recipient_values = []
+
+        if baseline_contact and baseline_contact.get("email") == baseline_contact.get("email"):
+            recipient_values.append(baseline_contact.get("email"))
+
+        if include_target_email and target_contact and target_contact.get("email") == target_contact.get("email"):
+            recipient_values.append(target_contact.get("email"))
+
+        return self.dispatcher.normalize_email_recipients(recipient_values)
 
     def _execute_action_plan(self, action_plan):
 
         event = action_plan["event"]
         contacts = action_plan["contacts"]
-        merged_recipients = contacts["merged_email_recipients"]
-        other_actions = contacts["other_actions"]
+        execution_actions = contacts["execution_actions"]
         target_contact = contacts["target_contact"]
+        results = []
 
-        # dispatch EMAIL consolidado
-        if merged_recipients:
-
-            self.dispatcher.dispatch(
-                event=event,
-                actions=["email"],
-                contacts=[merged_recipients]
+        if execution_actions and not target_contact and not contacts["email_requested"]:
+            print(
+                f"[{console.level('WARNING')}] "
+                "No se envía resumen: no hay contacto destino para ejecutar acciones"
             )
+            return {"success": True, "results": []}
 
-        # ejecutar otras acciones no-email normalmente
-        if other_actions and target_contact:
+        if execution_actions and target_contact:
 
-            self.dispatcher.dispatch(
+            dispatch_result = self.dispatcher.dispatch(
                 event=event,
-                actions=other_actions,
+                actions=execution_actions,
                 contacts=[target_contact]
             )
+            results.extend(dispatch_result.get("results", []))
+
+        if str(event.status) in ("1", "PROBLEM"):
+            email_result = self.dispatcher.send_email_summary(
+                event=event,
+                recipients=contacts["summary_recipients"],
+                action_results=results,
+            )
+            results.append(email_result)
+
+        return {
+            "success": all(result.get("success") for result in results) if results else True,
+            "results": results,
+        }
 
     def _schedule_action_plan(self, action_plan):
 
@@ -349,11 +339,11 @@ class RuleEngine:
         contacts_payload = {
             "baseline_contact": contacts["baseline_contact"],
             "target_contact": contacts["target_contact"],
-            "email_recipients": contacts["email_recipients"],
-            "merged_email_recipients": contacts["merged_email_recipients"],
+            "target_contact_source": contacts["target_contact_source"],
+            "summary_recipients": contacts["summary_recipients"],
+            "email_requested": contacts["email_requested"],
+            "execution_actions": contacts["execution_actions"],
             "dispatch_contacts": {
-                "email": [contacts["merged_email_recipients"]]
-                if contacts["merged_email_recipients"] else [],
                 "other": [contacts["target_contact"]]
                 if contacts["target_contact"] else [],
             },

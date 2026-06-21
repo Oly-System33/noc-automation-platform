@@ -216,27 +216,40 @@ class ScheduledActionWorker:
         event = self._build_event(scheduled_action)
         actions = scheduled_action.get("actions") or []
         contacts_payload = scheduled_action.get("contacts_payload") or {}
-        merged_email_recipients = contacts_payload.get("merged_email_recipients")
         target_contact = contacts_payload.get("target_contact")
+        execution_actions = contacts_payload.get("execution_actions")
+        summary_recipients = contacts_payload.get("summary_recipients") or []
         results = []
 
-        if "email" in actions and merged_email_recipients:
-            email_result = self.dispatcher.dispatch(
-                event=event,
-                actions=["email"],
-                contacts=[merged_email_recipients],
+        if not summary_recipients and contacts_payload.get("merged_email_recipients"):
+            summary_recipients = self.dispatcher.normalize_email_recipients([
+                contacts_payload.get("merged_email_recipients")
+            ])
+
+        if execution_actions is None:
+            execution_actions = [action for action in actions if action != "email"]
+
+        if execution_actions and not target_contact and "email" not in actions:
+            print(
+                f"[{console.level('WARNING')}] "
+                "No se envía resumen: no hay contacto destino para ejecutar acciones"
             )
-            results.extend(email_result.get("results", []))
+            return {"success": True, "results": []}
 
-        other_actions = [action for action in actions if action != "email"]
-
-        if other_actions and target_contact:
+        if execution_actions and target_contact:
             other_result = self.dispatcher.dispatch(
                 event=event,
-                actions=other_actions,
+                actions=execution_actions,
                 contacts=[target_contact],
             )
             results.extend(other_result.get("results", []))
+
+        email_result = self.dispatcher.send_email_summary(
+            event=event,
+            recipients=summary_recipients,
+            action_results=results,
+        )
+        results.append(email_result)
 
         return {
             "success": all(result["success"] for result in results) if results else True,
