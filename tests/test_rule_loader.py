@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -394,6 +394,30 @@ class RuleLoaderOncallCalendarTest(unittest.TestCase):
             "email": "guardia@example.com",
         }
 
+    def david_row(self):
+        return {
+            "team": "msp",
+            "start_date": "2026-06-17",
+            "end_date": "2026-06-24",
+            "start_time": "21:00",
+            "end_time": "09:00",
+            "user": "David Silva",
+            "phone": "5491111111111",
+            "email": "david@example.com",
+        }
+
+    def diego_row(self):
+        return {
+            "team": "msp",
+            "start_date": "2026-06-24",
+            "end_date": "2026-07-01",
+            "start_time": "21:00",
+            "end_time": "09:00",
+            "user": "Diego Greppi",
+            "phone": "5492222222222",
+            "email": "diego@example.com",
+        }
+
     def test_business_day_inside_time_window_returns_contact(self):
         self.load_oncall([self.default_oncall_row()], [])
 
@@ -521,6 +545,139 @@ class RuleLoaderOncallCalendarTest(unittest.TestCase):
         )
 
         self.assertIsNone(contact)
+
+    def test_assignment_change_day_before_end_time_keeps_previous_user(self):
+        self.load_oncall([self.david_row(), self.diego_row()], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "msp",
+            now=datetime(2026, 6, 24, 8, 30),
+        )
+
+        self.assertIsNotNone(contact)
+        self.assertEqual(contact["user"], "David Silva")
+
+    def test_assignment_change_day_after_end_time_has_no_oncall(self):
+        self.load_oncall([self.david_row(), self.diego_row()], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "msp",
+            now=datetime(2026, 6, 24, 10, 0),
+        )
+
+        self.assertIsNone(contact)
+
+    def test_assignment_start_day_before_start_time_has_no_oncall(self):
+        self.load_oncall([self.david_row(), self.diego_row()], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "msp",
+            now=datetime(2026, 6, 24, 20, 30),
+        )
+
+        self.assertIsNone(contact)
+
+    def test_assignment_start_day_after_start_time_uses_new_user(self):
+        self.load_oncall([self.david_row(), self.diego_row()], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "msp",
+            now=datetime(2026, 6, 24, 21, 30),
+        )
+
+        self.assertIsNotNone(contact)
+        self.assertEqual(contact["user"], "Diego Greppi")
+
+    def test_business_day_inside_assignment_but_outside_window_has_no_oncall(self):
+        self.load_oncall([self.david_row()], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "msp",
+            now=datetime(2026, 6, 18, 15, 0),
+        )
+
+        self.assertIsNone(contact)
+
+    def test_weekend_inside_assignment_is_covered_24h(self):
+        self.load_oncall([self.diego_row()], [])
+
+        cases = [
+            datetime(2026, 6, 27, 10, 0),
+            datetime(2026, 6, 27, 15, 0),
+            datetime(2026, 6, 28, 3, 0),
+        ]
+
+        for now in cases:
+            with self.subTest(now=now):
+                contact = self.loader.get_oncall_contact("client", "msp", now=now)
+                self.assertIsNotNone(contact)
+                self.assertEqual(contact["user"], "Diego Greppi")
+                self.assertEqual(contact["oncall_reason"], "weekend_24h")
+
+    def test_weekend_outside_assignment_is_not_covered(self):
+        row = self.diego_row()
+        row["start_date"] = "2026-06-27"
+        row["start_time"] = "21:00"
+        self.load_oncall([row], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "msp",
+            now=datetime(2026, 6, 27, 10, 0),
+        )
+
+        self.assertIsNone(contact)
+
+    def test_overlapping_rows_use_most_recent_assignment_start(self):
+        first = self.diego_row()
+        first["user"] = "Older Guardia"
+        first["start_date"] = "2026-06-24"
+        second = self.diego_row()
+        second["user"] = "Newer Guardia"
+        second["start_date"] = "2026-06-25"
+        self.load_oncall([first, second], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "msp",
+            now=datetime(2026, 6, 27, 10, 0),
+        )
+
+        self.assertIsNotNone(contact)
+        self.assertEqual(contact["user"], "Newer Guardia")
+
+    def test_timezone_aware_now_is_converted_to_local_time(self):
+        self.load_oncall([self.diego_row()], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "msp",
+            now=datetime(2026, 6, 25, 0, 30, tzinfo=timezone.utc),
+        )
+
+        self.assertIsNotNone(contact)
+        self.assertEqual(contact["user"], "Diego Greppi")
+
+    def test_invalid_oncall_row_is_ignored_without_breaking_valid_rows(self):
+        invalid = self.diego_row()
+        invalid["start_date"] = "bad-date"
+        invalid["user"] = "Invalid Guardia"
+        valid = self.diego_row()
+        self.load_oncall([invalid, valid], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "msp",
+            now=datetime(2026, 6, 24, 21, 30),
+        )
+
+        self.assertIsNotNone(contact)
+        self.assertEqual(contact["user"], "Diego Greppi")
 
 
 class RuleLoaderHostParsingTest(unittest.TestCase):

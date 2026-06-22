@@ -468,7 +468,7 @@ class RuleLoader:
         if not required_columns.issubset(oncall_df.columns):
             return None
 
-        now = now or datetime.now(ZoneInfo("America/Argentina/Buenos_Aires"))
+        now = self._normalize_oncall_now(now)
         current_date = now.date()
         current_time = now.time()
         holiday = self._get_holiday(client, current_date)
@@ -481,23 +481,26 @@ class RuleLoader:
             matches = oncall_df[
                 (oncall_df["team"].astype(str).str.strip() == team_match)
             ]
+            candidates = []
 
             for _, row in matches.iterrows():
 
-                start_date = self._parse_date(row.get("start_date"))
-                end_date = self._parse_date(row.get("end_date"))
-                start_time = self._parse_time(row.get("start_time"))
-                end_time = self._parse_time(row.get("end_time"))
+                assignment_window = self._build_assignment_window(row)
 
-                if not start_date or not end_date or not start_time or not end_time:
+                if not assignment_window:
+                    self._log_invalid_oncall_row(team_match, row)
                     continue
 
-                if not start_date <= current_date <= end_date:
+                assignment_start, assignment_end, start_time, end_time = assignment_window
+
+                if not self._is_assignment_active(now, assignment_start, assignment_end):
                     continue
 
                 print(
                     f"[{console.cyan('ONCALL')}] Fila activa encontrada | "
-                    f"team={team_match} | date={current_date}"
+                    f"team={team_match} | date={current_date} | "
+                    f"assignment_start={assignment_start} | "
+                    f"assignment_end={assignment_end}"
                 )
 
                 if holiday:
@@ -506,21 +509,26 @@ class RuleLoader:
                         f"team={team_match} | date={current_date} | "
                         f"holiday={holiday.get('name')}"
                     )
-                    return self._format_oncall_contact(
-                        row,
-                        reason="holiday_24h",
-                        holiday=holiday,
-                    )
+                    candidates.append({
+                        "row": row,
+                        "assignment_start": assignment_start,
+                        "reason": "holiday_24h",
+                        "holiday": holiday,
+                    })
+                    continue
 
                 if is_weekend:
                     print(
                         f"[{console.cyan('ONCALL')}] Guardia 24h por fin de semana | "
                         f"team={team_match} | date={current_date}"
                     )
-                    return self._format_oncall_contact(
-                        row,
-                        reason="weekend_24h",
-                    )
+                    candidates.append({
+                        "row": row,
+                        "assignment_start": assignment_start,
+                        "reason": "weekend_24h",
+                        "holiday": None,
+                    })
+                    continue
 
                 if self._is_time_active(current_time, start_time, end_time):
                     print(
@@ -528,16 +536,84 @@ class RuleLoader:
                         f"team={team_match} | time={current_time.strftime('%H:%M')} | "
                         f"window={start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')}"
                     )
-                    return self._format_oncall_contact(
-                        row,
-                        reason="business_day_time_window",
-                    )
+                    candidates.append({
+                        "row": row,
+                        "assignment_start": assignment_start,
+                        "reason": "business_day_time_window",
+                        "holiday": None,
+                    })
+
+            if candidates:
+                selected = self._select_oncall_candidate(team_match, candidates)
+                return self._format_oncall_contact(
+                    selected["row"],
+                    reason=selected["reason"],
+                    holiday=selected["holiday"],
+                )
 
         print(
             f"[{console.cyan('ONCALL')}] Sin guardia activa | "
             f"team={team} | date={current_date} | time={current_time.strftime('%H:%M')}"
         )
         return None
+
+    def _normalize_oncall_now(self, now):
+
+        local_timezone = ZoneInfo("America/Argentina/Buenos_Aires")
+
+        if now is None:
+            now = datetime.now(local_timezone)
+
+        if now.tzinfo is not None:
+            now = now.astimezone(local_timezone).replace(tzinfo=None)
+
+        return now
+
+    def _build_assignment_window(self, row):
+
+        start_date = self._parse_date(row.get("start_date"))
+        end_date = self._parse_date(row.get("end_date"))
+        start_time = self._parse_time(row.get("start_time"))
+        end_time = self._parse_time(row.get("end_time"))
+
+        if not start_date or not end_date or not start_time or not end_time:
+            return None
+
+        assignment_start = datetime.combine(start_date, start_time)
+        assignment_end = datetime.combine(end_date, end_time)
+
+        if assignment_end < assignment_start:
+            return None
+
+        return assignment_start, assignment_end, start_time, end_time
+
+    def _is_assignment_active(self, now, assignment_start, assignment_end):
+
+        return assignment_start <= now <= assignment_end
+
+    def _select_oncall_candidate(self, team, candidates):
+
+        if len(candidates) > 1:
+            print(
+                f"[{console.level('WARNING')}] Overlapping oncall rows detected | "
+                f"team={team} | count={len(candidates)} | "
+                "using most recent assignment_start"
+            )
+
+        return sorted(
+            candidates,
+            key=lambda candidate: candidate["assignment_start"],
+            reverse=True,
+        )[0]
+
+    def _log_invalid_oncall_row(self, team, row):
+
+        print(
+            f"[{console.level('WARNING')}] Invalid oncall row ignored | "
+            f"team={team} | user={row.get('user')} | "
+            f"start_date={row.get('start_date')} | end_date={row.get('end_date')} | "
+            f"start_time={row.get('start_time')} | end_time={row.get('end_time')}"
+        )
 
     def _format_oncall_contact(self, row, reason=None, holiday=None):
 
