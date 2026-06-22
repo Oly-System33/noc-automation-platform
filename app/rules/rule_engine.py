@@ -414,6 +414,37 @@ class RuleEngine:
             pre_target=action.get("pre_target"),
         )
 
+        if result.get("success"):
+            scheduled_action_id = result.get("scheduled_action_id")
+            status_text = (
+                "PENDING MANUAL APPROVAL ALREADY EXISTS"
+                if result.get("duplicate")
+                else "ACTION PENDING MANUAL APPROVAL"
+            )
+            approve_command = (
+                f".venv/bin/python -m app.cli.approve_action "
+                f"{scheduled_action_id}"
+            )
+            cancel_command = (
+                f".venv/bin/python -m app.cli.cancel_action "
+                f"{scheduled_action_id}"
+            )
+            print(
+                f"[{console.cyan('RULE_ENGINE')}] "
+                f"{console.yellow(status_text)} | "
+                f"event_id={console.cyan(event.event_id)} | "
+                f"approval_id={console.orange(scheduled_action_id)} | "
+                f"target={target} | pre_target={action.get('pre_target')}"
+            )
+            print(
+                f"[{console.cyan('RULE_ENGINE')}] "
+                f"Approve: {console.orange(approve_command)}"
+            )
+            print(
+                f"[{console.cyan('RULE_ENGINE')}] "
+                f"Cancel pending action only: {console.orange(cancel_command)}"
+            )
+
         persistence_service.record_audit_log(
             event_id=event.event_id,
             level="INFO" if result.get("success") else "ERROR",
