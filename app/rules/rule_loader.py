@@ -69,6 +69,12 @@ class RuleLoader:
         except ValueError:
             data["oncall"] = None
 
+        try:
+            data["holidays"] = pd.read_excel(file_path, sheet_name="holidays")
+        except ValueError:
+            data["holidays"] = None
+            print("[RUNBOOK] Hoja holidays no encontrada; feriados deshabilitados")
+
         self.cache[client] = data
 
         return data
@@ -401,7 +407,7 @@ class RuleLoader:
 
         return match.iloc[0].to_dict()
 
-    def get_oncall_contact(self, client, team):
+    def get_oncall_contact(self, client, team, now=None):
 
         data = self._load_client_runbook(client)
 
@@ -425,9 +431,11 @@ class RuleLoader:
         if not required_columns.issubset(oncall_df.columns):
             return None
 
-        now = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires"))
+        now = now or datetime.now(ZoneInfo("America/Argentina/Buenos_Aires"))
         current_date = now.date()
         current_time = now.time()
+        holiday = self._get_holiday(client, current_date)
+        is_weekend = self._is_weekend(current_date)
 
         priorities = [team, "*"]
 
@@ -450,17 +458,94 @@ class RuleLoader:
                 if not start_date <= current_date <= end_date:
                     continue
 
+                print(
+                    f"[{console.cyan('ONCALL')}] Fila activa encontrada | "
+                    f"team={team_match} | date={current_date}"
+                )
+
+                if holiday:
+                    print(
+                        f"[{console.cyan('ONCALL')}] Guardia 24h por feriado | "
+                        f"team={team_match} | date={current_date} | "
+                        f"holiday={holiday.get('name')}"
+                    )
+                    return self._format_oncall_contact(
+                        row,
+                        reason="holiday_24h",
+                        holiday=holiday,
+                    )
+
+                if is_weekend:
+                    print(
+                        f"[{console.cyan('ONCALL')}] Guardia 24h por fin de semana | "
+                        f"team={team_match} | date={current_date}"
+                    )
+                    return self._format_oncall_contact(
+                        row,
+                        reason="weekend_24h",
+                    )
+
                 if self._is_time_active(current_time, start_time, end_time):
-                    return {
-                        "team": row.get("team"),
-                        "user": row.get("user"),
-                        "phone": row.get("phone"),
-                        "email": row.get("email"),
-                        "telegram": row.get("telegram"),
-                        "teams": row.get("teams"),
-                    }
+                    print(
+                        f"[{console.cyan('ONCALL')}] Guardia por ventana horaria | "
+                        f"team={team_match} | time={current_time.strftime('%H:%M')} | "
+                        f"window={start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')}"
+                    )
+                    return self._format_oncall_contact(
+                        row,
+                        reason="business_day_time_window",
+                    )
+
+        print(
+            f"[{console.cyan('ONCALL')}] Sin guardia activa | "
+            f"team={team} | date={current_date} | time={current_time.strftime('%H:%M')}"
+        )
+        return None
+
+    def _format_oncall_contact(self, row, reason=None, holiday=None):
+
+        return {
+            "team": row.get("team"),
+            "user": row.get("user"),
+            "phone": row.get("phone"),
+            "email": row.get("email"),
+            "telegram": row.get("telegram"),
+            "teams": row.get("teams"),
+            "oncall_reason": reason,
+            "holiday_name": holiday.get("name") if holiday else None,
+        }
+
+    def _get_holiday(self, client, current_date):
+
+        data = self._load_client_runbook(client)
+        holidays_df = data.get("holidays")
+
+        if holidays_df is None or holidays_df.empty:
+
+            return None
+
+        if "date" not in holidays_df.columns:
+            print("[RUNBOOK] Hoja holidays sin columna date; feriados deshabilitados")
+            return None
+
+        for _, row in holidays_df.iterrows():
+
+            holiday_date = self._parse_date(row.get("date"))
+
+            if not holiday_date:
+                continue
+
+            if holiday_date == current_date:
+                return {
+                    "date": holiday_date,
+                    "name": self._clean_value(row.get("name")) if "name" in row.index else None,
+                }
 
         return None
+
+    def _is_weekend(self, current_date):
+
+        return current_date.weekday() >= 5
 
     def _parse_date(self, value):
 

@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 
 import pandas as pd
 
@@ -331,6 +332,158 @@ class RuleLoaderGetActionTest(unittest.TestCase):
                     self.loader.parse_delay_minutes(value),
                     expected,
                 )
+
+
+class RuleLoaderOncallCalendarTest(unittest.TestCase):
+
+    def setUp(self):
+        self.loader = RuleLoader()
+
+    def load_oncall(self, oncall_rows=None, holiday_rows=None):
+        self.loader.cache["client"] = {
+            "oncall": pd.DataFrame(oncall_rows or []),
+            "holidays": None if holiday_rows is None else pd.DataFrame(holiday_rows),
+        }
+
+    def default_oncall_row(self):
+        return {
+            "team": "noc",
+            "start_date": "2026-06-01",
+            "end_date": "2026-06-30",
+            "start_time": "21:00",
+            "end_time": "09:00",
+            "user": "Juan",
+            "phone": "5491111111111",
+            "email": "guardia@example.com",
+        }
+
+    def test_business_day_inside_time_window_returns_contact(self):
+        self.load_oncall([self.default_oncall_row()], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "noc",
+            now=datetime(2026, 6, 1, 22, 0),
+        )
+
+        self.assertIsNotNone(contact)
+        self.assertEqual(contact["oncall_reason"], "business_day_time_window")
+
+    def test_business_day_outside_time_window_returns_none(self):
+        self.load_oncall([self.default_oncall_row()], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "noc",
+            now=datetime(2026, 6, 1, 10, 0),
+        )
+
+        self.assertIsNone(contact)
+
+    def test_overnight_window_matches_early_morning(self):
+        self.load_oncall([self.default_oncall_row()], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "noc",
+            now=datetime(2026, 6, 2, 3, 0),
+        )
+
+        self.assertIsNotNone(contact)
+        self.assertEqual(contact["oncall_reason"], "business_day_time_window")
+
+    def test_saturday_is_covered_24h_inside_date_range(self):
+        self.load_oncall([self.default_oncall_row()], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "noc",
+            now=datetime(2026, 6, 6, 10, 0),
+        )
+
+        self.assertIsNotNone(contact)
+        self.assertEqual(contact["oncall_reason"], "weekend_24h")
+
+    def test_sunday_is_covered_24h_inside_date_range(self):
+        self.load_oncall([self.default_oncall_row()], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "noc",
+            now=datetime(2026, 6, 7, 15, 0),
+        )
+
+        self.assertIsNotNone(contact)
+        self.assertEqual(contact["oncall_reason"], "weekend_24h")
+
+    def test_holiday_is_covered_24h_inside_date_range(self):
+        self.load_oncall(
+            [self.default_oncall_row()],
+            [{"date": "2026-06-17", "name": "Feriado X"}],
+        )
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "noc",
+            now=datetime(2026, 6, 17, 11, 0),
+        )
+
+        self.assertIsNotNone(contact)
+        self.assertEqual(contact["oncall_reason"], "holiday_24h")
+        self.assertEqual(contact["holiday_name"], "Feriado X")
+
+    def test_holiday_exact_date_does_not_convert_entire_range_to_24h(self):
+        self.load_oncall(
+            [self.default_oncall_row()],
+            [{"date": "2026-06-17", "name": "Feriado X"}],
+        )
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "noc",
+            now=datetime(2026, 6, 18, 11, 0),
+        )
+
+        self.assertIsNone(contact)
+
+    def test_missing_holidays_sheet_does_not_break_oncall(self):
+        self.load_oncall([self.default_oncall_row()], None)
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "noc",
+            now=datetime(2026, 6, 1, 22, 0),
+        )
+
+        self.assertIsNotNone(contact)
+
+    def test_invalid_holiday_date_is_ignored(self):
+        self.load_oncall(
+            [self.default_oncall_row()],
+            [{"date": "invalid", "name": "Bad holiday"}],
+        )
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "noc",
+            now=datetime(2026, 6, 17, 11, 0),
+        )
+
+        self.assertIsNone(contact)
+
+    def test_without_active_oncall_row_returns_none(self):
+        row = self.default_oncall_row()
+        row["start_date"] = "2026-07-01"
+        row["end_date"] = "2026-07-31"
+        self.load_oncall([row], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "noc",
+            now=datetime(2026, 6, 17, 22, 0),
+        )
+
+        self.assertIsNone(contact)
 
 
 class RuleLoaderHostParsingTest(unittest.TestCase):
