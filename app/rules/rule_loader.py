@@ -33,6 +33,8 @@ ACTION_ALIASES = {
     "microsoft teams": "teams",
 }
 
+APPROVAL_WHEN_VALUES = {"never", "always", "no_oncall"}
+
 
 class RuleLoader:
     """
@@ -282,6 +284,7 @@ class RuleLoader:
 
         action_row = row.to_dict()
         action_row["action_raw"] = action_row.get("action")
+        action_row["pre_actions_raw"] = action_row.get("pre_actions")
         action_row["delay_minutes_raw"] = action_row.get("delay_minutes")
         action_row["delay_minutes_invalid"] = self.is_invalid_delay_minutes(
             action_row.get("delay_minutes")
@@ -294,7 +297,41 @@ class RuleLoader:
         action_row["action"] = actions
         action_row["invalid_actions"] = invalid_actions
 
+        pre_actions, invalid_pre_actions = self.normalize_actions(
+            action_row.get("pre_actions")
+        )
+        action_row["pre_actions"] = pre_actions
+        action_row["invalid_pre_actions"] = invalid_pre_actions
+        action_row["approval_when"] = self.normalize_approval_when(
+            action_row.get("approval_when")
+        )
+        action_row["pre_target"] = self._clean_value(action_row.get("pre_target"))
+
         return action_row
+
+    def normalize_approval_when(self, value):
+
+        if pd.isna(value):
+
+            return "never"
+
+        normalized = str(value).strip().lower()
+
+        if not normalized:
+
+            return "never"
+
+        normalized = normalized.replace("-", "_").replace(" ", "_")
+
+        if normalized in APPROVAL_WHEN_VALUES:
+
+            return normalized
+
+        print(
+            f"[{console.level('WARNING')}] Invalid approval_when, using never | "
+            f"value={value}"
+        )
+        return "never"
 
     def normalize_actions(self, value):
 

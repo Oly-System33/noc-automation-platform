@@ -205,30 +205,53 @@ class RuleEngine:
 
         baseline_contact = rule_loader.get_contact(client, "baseline")
 
-        target_contact_source = "oncall"
-        target_contact = rule_loader.get_oncall_contact(client, team)
+        oncall_contact = rule_loader.get_oncall_contact(client, team)
+        target_contact_source = "oncall" if oncall_contact else "contact"
+        target_contact = oncall_contact
 
         if not target_contact:
-            target_contact_source = "contact"
             target_contact = rule_loader.get_contact(client, team)
 
-        # inyectar jira_project, jira_issue_type, jira_request_type desde hoja actions
-        if target_contact:
+        self._apply_action_metadata(target_contact, action, event)
 
-            if "jira" in action.get("action", []):
-                target_contact["jira_priority"] = rule_loader.get_jira_priority(
-                    client,
-                    event.severity,
-                )
+        approval_when = action.get("approval_when") or "never"
+        requires_approval = (
+            approval_when == "always"
+            or (approval_when == "no_oncall" and not oncall_contact)
+        )
 
-            if "jira_project" in action:
-                target_contact["jira_project"] = action["jira_project"]
+        if action.get("invalid_pre_actions"):
+            print(
+                f"[{console.level('WARNING')}] Invalid runbook pre-actions ignored | "
+                f"actions={action.get('invalid_pre_actions')}"
+            )
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="WARNING",
+                component="rule_engine",
+                message="Invalid runbook pre-actions ignored",
+                details={
+                    "invalid_pre_actions": action.get("invalid_pre_actions"),
+                    "raw_pre_actions": action.get("pre_actions_raw"),
+                    "client": client,
+                    "host": host,
+                    "trigger_group": trigger_group,
+                    "target": team,
+                },
+            )
 
-            if "jira_issue_type" in action:
-                target_contact["jira_issue_type"] = action["jira_issue_type"]
-
-            if "jira_request_type" in action:
-                target_contact["jira_request_type"] = action["jira_request_type"]
+        if requires_approval:
+            self._handle_manual_approval_required(
+                event=event,
+                client=client,
+                host=host,
+                trigger_group=trigger_group,
+                action=action,
+                target=team,
+                baseline_contact=baseline_contact,
+                approval_when=approval_when,
+            )
+            return
 
         action_plan = self._build_action_plan(
             event=event,
@@ -249,6 +272,162 @@ class RuleEngine:
 
         self._execute_action_plan(action_plan)
 
+    def _apply_action_metadata(self, contact, action, event):
+
+        if not contact:
+
+            return
+
+        if "jira" in action.get("action", []) or "jira" in action.get("pre_actions", []):
+            contact["jira_priority"] = rule_loader.get_jira_priority(
+                getattr(event, "client", None),
+                event.severity,
+            )
+
+        if "jira_project" in action:
+            contact["jira_project"] = action["jira_project"]
+
+        if "jira_issue_type" in action:
+            contact["jira_issue_type"] = action["jira_issue_type"]
+
+        if "jira_request_type" in action:
+            contact["jira_request_type"] = action["jira_request_type"]
+
+    def _handle_manual_approval_required(self, event, client, host, trigger_group, action, target, baseline_contact, approval_when):
+
+        print(
+            f"[{console.cyan('RULE_ENGINE')}] "
+            f"{console.yellow('Action requires manual approval')} | "
+            f"event_id={event.event_id} | approval_when={approval_when}"
+        )
+        persistence_service.record_audit_log(
+            event_id=event.event_id,
+            level="INFO",
+            component="rule_engine",
+            message="Action requires manual approval",
+            details={
+                "actions": action.get("action"),
+                "target": target,
+                "approval_when": approval_when,
+                "pre_actions": action.get("pre_actions"),
+                "pre_target": action.get("pre_target"),
+            },
+        )
+
+        self._execute_pre_actions(
+            event=event,
+            client=client,
+            host=host,
+            trigger_group=trigger_group,
+            action=action,
+            baseline_contact=baseline_contact,
+        )
+        self._create_pending_approval(
+            event=event,
+            client=client,
+            host=host,
+            trigger_group=trigger_group,
+            action=action,
+            target=target,
+            baseline_contact=baseline_contact,
+            approval_when=approval_when,
+        )
+
+    def _execute_pre_actions(self, event, client, host, trigger_group, action, baseline_contact):
+
+        pre_actions = [
+            pre_action for pre_action in action.get("pre_actions") or []
+            if pre_action != "calls"
+        ]
+
+        if not pre_actions:
+
+            return
+
+        pre_target = action.get("pre_target")
+        pre_contact = rule_loader.get_contact(client, pre_target) if pre_target else None
+
+        if not pre_contact:
+            print(
+                f"[{console.level('WARNING')}] "
+                "Pre-actions skipped: pre_target contact not found"
+            )
+            persistence_service.record_audit_log(
+                event_id=event.event_id,
+                level="WARNING",
+                component="rule_engine",
+                message="Pre-actions skipped because pre_target contact was not found",
+                details={"pre_target": pre_target, "pre_actions": pre_actions},
+            )
+            return
+
+        pre_action = dict(action)
+        pre_action["action"] = pre_actions
+        self._apply_action_metadata(pre_contact, pre_action, event)
+        pre_plan = self._build_action_plan(
+            event=event,
+            client=client,
+            host=host,
+            trigger_group=trigger_group,
+            action=pre_action,
+            target=pre_target,
+            baseline_contact=baseline_contact,
+            target_contact=pre_contact,
+            target_contact_source="contact",
+            delay_minutes=0,
+        )
+        self._execute_action_plan(pre_plan)
+        persistence_service.record_audit_log(
+            event_id=event.event_id,
+            level="INFO",
+            component="rule_engine",
+            message="Pre-actions executed",
+            details={"pre_target": pre_target, "pre_actions": pre_actions},
+        )
+
+    def _create_pending_approval(self, event, client, host, trigger_group, action, target, baseline_contact, approval_when):
+
+        contacts_payload = {
+            "baseline_contact": baseline_contact,
+            "pre_target": action.get("pre_target"),
+            "action_metadata": {
+                "jira_project": action.get("jira_project"),
+                "jira_issue_type": action.get("jira_issue_type"),
+                "jira_request_type": action.get("jira_request_type"),
+            },
+            "worker_note": "Manual approval action; contacts must be re-resolved at approval time.",
+        }
+
+        result = persistence_service.create_scheduled_action(
+            event=event,
+            client=client,
+            host=host,
+            trigger_group=trigger_group,
+            actions=action.get("action"),
+            target=target,
+            contacts_payload=contacts_payload,
+            scheduled_at=datetime.now(timezone.utc),
+            state="pending_approval",
+            execution_mode="manual_approval",
+            approval_when=approval_when,
+            pre_actions=action.get("pre_actions"),
+            pre_target=action.get("pre_target"),
+        )
+
+        persistence_service.record_audit_log(
+            event_id=event.event_id,
+            level="INFO" if result.get("success") else "ERROR",
+            component="rule_engine",
+            message="Pending approval action created" if result.get("success") else "Failed to create pending approval action",
+            details={
+                "scheduled_action_id": result.get("scheduled_action_id"),
+                "duplicate": result.get("duplicate"),
+                "error": result.get("error"),
+                "target": target,
+                "actions": action.get("action"),
+            },
+        )
+
     def _build_action_plan(self, event, client, host, trigger_group, action, target, baseline_contact, target_contact, target_contact_source, delay_minutes):
 
         email_requested = "email" in action["action"]
@@ -261,6 +440,9 @@ class RuleEngine:
             a for a in action["action"]
             if a != "email"
         ])
+
+        if target_contact:
+            target_contact["_calls_allowed"] = target_contact_source == "oncall"
 
         return {
             "event": event,

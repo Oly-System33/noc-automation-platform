@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from app.models.event_model import ZabbixEvent
 from app.services.persistence_service import PersistenceService
@@ -179,6 +180,124 @@ class ScheduledActionWorkerTest(unittest.TestCase):
         self.assertEqual(calls[1][0], "summary")
         self.assertEqual(calls[1][1], ["noc@example.com"])
         self.assertEqual(calls[1][2][0]["issue_key"], "NOC-1")
+
+    def test_manual_approval_without_oncall_uses_pre_target_and_blocks_calls(self):
+        calls = []
+
+        class FakeDispatcher:
+
+            def normalize_email_recipients(self, values):
+                return [value for value in values if value]
+
+            def build_dispatch_context(self, event):
+                return {}
+
+            def order_execution_actions(self, actions):
+                return actions
+
+            def dispatch(self, event, actions, contacts, context=None):
+                calls.append((actions, contacts[0]))
+                return {"success": True, "results": [], "context": context}
+
+            def send_email_summary(self, event, recipients, action_results, context=None):
+                calls.append(("summary", recipients))
+                return {"action": "email_summary", "success": True, "sent": True}
+
+        class FakeRuleLoader:
+
+            def get_contact(self, client, team):
+                contacts = {
+                    "baseline": {"email": "baseline@example.com"},
+                    "noc": {"team": "noc", "email": "noc@example.com", "telegram": "chat"},
+                }
+                return contacts.get(team)
+
+            def get_oncall_contact(self, client, team):
+                return None
+
+            def get_jira_priority(self, client, severity):
+                return "High"
+
+        scheduled_action = {
+            "event_id": "event-approval",
+            "client": "Banco X",
+            "host": "test-noc",
+            "trigger": "Zabbix agent unavailable",
+            "severity": "High",
+            "trigger_group": "availability",
+            "created_at": "2026-06-20T10:00:00",
+            "actions": ["telegram", "calls", "email"],
+            "target": "guardia",
+            "pre_target": "noc",
+            "execution_mode": "manual_approval",
+            "contacts_payload": {},
+        }
+
+        worker = ScheduledActionWorker(dispatcher=FakeDispatcher())
+
+        with patch("app.services.scheduled_action_worker.rule_loader", FakeRuleLoader()):
+            result = worker._execute_scheduled_action(scheduled_action)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(calls[0][0], ["telegram", "calls"])
+        self.assertEqual(calls[0][1]["team"], "noc")
+        self.assertFalse(calls[0][1]["_calls_allowed"])
+        self.assertEqual(calls[1], ("summary", ["baseline@example.com", "noc@example.com"]))
+
+    def test_manual_approval_with_oncall_allows_calls(self):
+        calls = []
+
+        class FakeDispatcher:
+
+            def normalize_email_recipients(self, values):
+                return [value for value in values if value]
+
+            def build_dispatch_context(self, event):
+                return {}
+
+            def order_execution_actions(self, actions):
+                return actions
+
+            def dispatch(self, event, actions, contacts, context=None):
+                calls.append((actions, contacts[0]))
+                return {"success": True, "results": [], "context": context}
+
+            def send_email_summary(self, event, recipients, action_results, context=None):
+                return {"action": "email_summary", "success": True, "sent": True}
+
+        class FakeRuleLoader:
+
+            def get_contact(self, client, team):
+                return {"email": "baseline@example.com"} if team == "baseline" else None
+
+            def get_oncall_contact(self, client, team):
+                return {"team": team, "email": "guardia@example.com", "phone": "54911"}
+
+            def get_jira_priority(self, client, severity):
+                return "High"
+
+        scheduled_action = {
+            "event_id": "event-approval-oncall",
+            "client": "Banco X",
+            "host": "test-noc",
+            "trigger": "Zabbix agent unavailable",
+            "severity": "High",
+            "trigger_group": "availability",
+            "created_at": "2026-06-20T10:00:00",
+            "actions": ["calls"],
+            "target": "guardia",
+            "pre_target": "noc",
+            "execution_mode": "manual_approval",
+            "contacts_payload": {},
+        }
+
+        worker = ScheduledActionWorker(dispatcher=FakeDispatcher())
+
+        with patch("app.services.scheduled_action_worker.rule_loader", FakeRuleLoader()):
+            result = worker._execute_scheduled_action(scheduled_action)
+
+        self.assertTrue(result["success"])
+        self.assertTrue(calls[0][1]["_calls_allowed"])
 
 
 class PersistenceIdempotencyHelpersTest(unittest.TestCase):

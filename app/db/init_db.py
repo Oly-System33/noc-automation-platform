@@ -36,6 +36,22 @@ def init_db():
             "ADD COLUMN IF NOT EXISTS last_error TEXT"
         ))
         connection.execute(text(
+            "ALTER TABLE scheduled_actions "
+            "ADD COLUMN IF NOT EXISTS execution_mode VARCHAR"
+        ))
+        connection.execute(text(
+            "ALTER TABLE scheduled_actions "
+            "ADD COLUMN IF NOT EXISTS approval_when VARCHAR"
+        ))
+        connection.execute(text(
+            "ALTER TABLE scheduled_actions "
+            "ADD COLUMN IF NOT EXISTS pre_actions JSONB"
+        ))
+        connection.execute(text(
+            "ALTER TABLE scheduled_actions "
+            "ADD COLUMN IF NOT EXISTS pre_target VARCHAR"
+        ))
+        connection.execute(text(
             "CREATE INDEX IF NOT EXISTS "
             "ix_scheduled_actions_state_scheduled_at "
             "ON scheduled_actions (state, scheduled_at)"

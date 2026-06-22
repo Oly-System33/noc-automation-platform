@@ -635,7 +635,7 @@ class PersistenceService:
             ",".join(normalized_actions),
         ])
 
-    def create_scheduled_action(self, event, client, host, trigger_group, actions, target, contacts_payload, scheduled_at):
+    def create_scheduled_action(self, event, client, host, trigger_group, actions, target, contacts_payload, scheduled_at, state="pending", execution_mode="delayed", approval_when="never", pre_actions=None, pre_target=None):
 
         session = SessionLocal()
         dedupe_key = self.build_scheduled_action_dedupe_key(
@@ -657,8 +657,12 @@ class PersistenceService:
                 target=target,
                 dedupe_key=dedupe_key,
                 contacts_payload=self._safe_value(contacts_payload),
+                execution_mode=execution_mode,
+                approval_when=approval_when,
+                pre_actions=self._safe_value(pre_actions),
+                pre_target=pre_target,
                 scheduled_at=scheduled_at,
-                state="pending",
+                state=state,
                 attempt_count=0,
             )
             session.add(record)
@@ -761,6 +765,10 @@ class PersistenceService:
             "actions": record.actions,
             "target": record.target,
             "contacts_payload": record.contacts_payload,
+            "execution_mode": record.execution_mode,
+            "approval_when": record.approval_when,
+            "pre_actions": record.pre_actions,
+            "pre_target": record.pre_target,
             "scheduled_at": record.scheduled_at,
             "state": record.state,
             "created_at": record.created_at,
@@ -775,6 +783,61 @@ class PersistenceService:
                 session.query(ScheduledActionRecord)
                 .filter(ScheduledActionRecord.id == scheduled_action_id)
                 .filter(ScheduledActionRecord.state == "pending")
+                .update({
+                    "state": "processing",
+                    "processing_started_at": self._now(),
+                    "attempt_count": ScheduledActionRecord.attempt_count + 1,
+                })
+            )
+
+            return updated == 1
+
+        return bool(self._run(operation))
+
+    def get_scheduled_action(self, scheduled_action_id):
+
+        def operation(session):
+            record = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.id == scheduled_action_id)
+                .one_or_none()
+            )
+
+            if not record:
+                return None
+
+            return self._scheduled_action_to_dict(record)
+
+        return self._run(operation)
+
+    def list_pending_approval_actions(self):
+
+        session = SessionLocal()
+
+        try:
+            records = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.state == "pending_approval")
+                .order_by(ScheduledActionRecord.created_at)
+                .all()
+            )
+
+            return [self._scheduled_action_to_dict(record) for record in records]
+
+        except Exception as e:
+            print(f"[{console.level('ERROR')}] Database operation failed: {e}")
+            return []
+
+        finally:
+            session.close()
+
+    def claim_pending_approval_action(self, scheduled_action_id):
+
+        def operation(session):
+            updated = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.id == scheduled_action_id)
+                .filter(ScheduledActionRecord.state == "pending_approval")
                 .update({
                     "state": "processing",
                     "processing_started_at": self._now(),
@@ -850,7 +913,7 @@ class PersistenceService:
             updated = (
                 session.query(ScheduledActionRecord)
                 .filter(ScheduledActionRecord.id == scheduled_action_id)
-                .filter(ScheduledActionRecord.state.in_(["pending", "processing"]))
+                .filter(ScheduledActionRecord.state.in_(["pending", "pending_approval", "processing"]))
                 .update({
                     "state": "cancelled",
                     "cancelled_at": self._now(),
@@ -874,7 +937,7 @@ class PersistenceService:
             count = (
                 session.query(ScheduledActionRecord)
                 .filter(ScheduledActionRecord.event_id == event_id)
-                .filter(ScheduledActionRecord.state == "pending")
+                .filter(ScheduledActionRecord.state.in_(["pending", "pending_approval"]))
                 .update({
                     "state": "cancelled",
                     "cancelled_at": self._now(),

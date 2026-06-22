@@ -410,14 +410,14 @@ class ActionDispatcher:
         if not recipient:
             print(f"[{console.level('WARNING')}] No email defined for contact")
             self._record_action(event, "email", contact, "skipped", error_message="No email defined for contact")
-            return {"action": "email", "success": False, "status": "skipped"}
+            return {"action": "email", "success": True, "status": "skipped"}
 
         recipients = self.normalize_email_recipients([recipient])
 
         if not recipients:
             print(f"[{console.level('WARNING')}] No valid email recipients defined")
             self._record_action(event, "email", recipient, "skipped", error_message="No valid email recipients defined")
-            return {"action": "email", "success": False, "status": "skipped"}
+            return {"action": "email", "success": True, "status": "skipped"}
 
         status = self._normalize_status(event.status)
 
@@ -465,14 +465,14 @@ class ActionDispatcher:
         if not chat_id:
             print(f"[{console.level('WARNING')}] No telegram defined for contact")
             self._record_action(event, "telegram", contact, "skipped", error_message="No telegram defined for contact")
-            return {"action": "telegram", "success": False, "status": "skipped"}
+            return {"action": "telegram", "success": True, "status": "skipped"}
 
         message = AlertMessageBuilder(event, context).telegram_message()
 
         if not self.telegram_bot_token:
             print(f"[{console.level('WARNING')}] No TELEGRAM_BOT_TOKEN_NOC defined")
             self._record_action(event, "telegram", chat_id, "skipped", error_message="No TELEGRAM_BOT_TOKEN_NOC defined")
-            return {"action": "telegram", "success": False, "status": "skipped"}
+            return {"action": "telegram", "success": True, "status": "skipped"}
 
         url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
 
@@ -520,12 +520,28 @@ class ActionDispatcher:
 
     def _action_calls(self, event, contact, context=None):
 
+        if isinstance(contact, dict) and contact.get("_calls_allowed") is False:
+            print(f"[{console.level('WARNING')}] Call skipped because no oncall is active")
+            self._record_action(
+                event,
+                "calls",
+                contact,
+                "skipped",
+                error_message="no_oncall_active",
+            )
+            return {
+                "action": "calls",
+                "success": True,
+                "status": "skipped",
+                "error": "no_oncall_active",
+            }
+
         phone = contact.get("phone")
 
         if not phone or phone != phone:
             print(f"[{console.level('WARNING')}] No phone defined for contact")
             self._record_action(event, "calls", contact, "skipped", error_message="No phone defined for contact")
-            return {"action": "calls", "success": False, "status": "skipped"}
+            return {"action": "calls", "success": True, "status": "skipped"}
 
         phone = self._normalize_phone_number(phone)
 
@@ -572,7 +588,7 @@ class ActionDispatcher:
         if not project_key:
             print(f"[{console.level('WARNING')}] No jira_project defined")
             self._record_action(event, "jira", contact, "skipped", error_message="No jira_project defined")
-            return {"action": "jira", "success": False, "status": "skipped"}
+            return {"action": "jira", "success": True, "status": "skipped"}
 
         client, host = rule_loader.extract_client_and_host(event.host)
 
@@ -676,7 +692,7 @@ class ActionDispatcher:
         if not teams_destination:
             print(f"[{console.level('WARNING')}] No teams destination defined")
             self._record_action(event, "teams", contact, "skipped", error_message="No teams destination defined")
-            return {"action": "teams", "success": False, "status": "skipped"}
+            return {"action": "teams", "success": True, "status": "skipped"}
 
         print(f"[DISPATCH][TEAMS->EMAIL] {console.cyan('enviando')} -> {teams_destination}")
 
@@ -687,7 +703,7 @@ class ActionDispatcher:
         if not recipients:
             print(f"[{console.level('WARNING')}] No valid teams destination defined")
             self._record_action(event, "teams", teams_destination, "skipped", error_message="No valid teams destination defined")
-            return {"action": "teams", "success": False, "status": "skipped"}
+            return {"action": "teams", "success": True, "status": "skipped"}
 
         try:
             self._send_email_message(recipients, subject, body)

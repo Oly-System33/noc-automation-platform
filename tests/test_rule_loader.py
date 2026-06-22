@@ -253,6 +253,43 @@ class RuleLoaderGetActionTest(unittest.TestCase):
 
         self.assertEqual(action["action"], ["calls", "jira"])
 
+    def test_optional_approval_columns_are_normalized(self):
+        self.load_runbook(
+            hosts=[{"host": "server01"}],
+            actions=[{
+                "host": "server01",
+                "trigger_group": "availability",
+                "action": "calls,email",
+                "target": "guardia_msp",
+                "approval_when": "no-oncall",
+                "pre_actions": "telegram;teams",
+                "pre_target": "noc",
+            }],
+        )
+
+        action = self.loader.get_action("client", "server01", "availability")
+
+        self.assertEqual(action["approval_when"], "no_oncall")
+        self.assertEqual(action["pre_actions"], ["telegram", "teams"])
+        self.assertEqual(action["pre_target"], "noc")
+
+    def test_missing_approval_columns_keep_legacy_defaults(self):
+        self.load_runbook(
+            hosts=[{"host": "server01"}],
+            actions=[{
+                "host": "server01",
+                "trigger_group": "availability",
+                "action": "email",
+                "target": "baseline",
+            }],
+        )
+
+        action = self.loader.get_action("client", "server01", "availability")
+
+        self.assertEqual(action["approval_when"], "never")
+        self.assertEqual(action["pre_actions"], [])
+        self.assertIsNone(action["pre_target"])
+
     def test_actions_skip_unknown_values_and_track_invalid_actions(self):
         self.load_runbook(
             hosts=[{"host": "server01"}],
