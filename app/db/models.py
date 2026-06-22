@@ -148,7 +148,7 @@ class CallFlowRecord(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(String, index=True, nullable=False)
+    event_id = Column(String, nullable=False)
     client = Column(String, nullable=True)
     host = Column(String, nullable=True)
     trigger = Column(Text, nullable=True)
