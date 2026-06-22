@@ -686,7 +686,19 @@ class RuleLoader:
         if isinstance(value, datetime):
             return value.time()
 
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            total_seconds = int(round(float(value) * 24 * 60 * 60))
+            total_seconds = total_seconds % (24 * 60 * 60)
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            seconds = total_seconds % 60
+
+            return time(hours, minutes, seconds)
+
         value = str(value).strip()
+
+        if not value:
+            return None
 
         for time_format in ("%H:%M:%S", "%H:%M"):
             try:

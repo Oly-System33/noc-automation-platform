@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 
 import pandas as pd
 
@@ -418,6 +418,33 @@ class RuleLoaderOncallCalendarTest(unittest.TestCase):
             "email": "diego@example.com",
         }
 
+    def excel_time_oncall_row(self):
+        row = self.david_row()
+        row["start_time"] = 0.875
+        row["end_time"] = 0.375
+        return row
+
+    def test_parse_time_supports_excel_numeric_values(self):
+        cases = [
+            (0.875, time(21, 0, 0)),
+            (0.375, time(9, 0, 0)),
+            (0.5, time(12, 0, 0)),
+            (0, time(0, 0, 0)),
+            ("21:00:00", time(21, 0, 0)),
+            ("09:00", time(9, 0, 0)),
+        ]
+
+        for value, expected in cases:
+            with self.subTest(value=value):
+                self.assertEqual(self.loader._parse_time(value), expected)
+
+    def test_parse_time_returns_none_for_invalid_values(self):
+        cases = [None, float("nan"), "", "   ", "bad", True, False]
+
+        for value in cases:
+            with self.subTest(value=value):
+                self.assertIsNone(self.loader._parse_time(value))
+
     def test_business_day_inside_time_window_returns_contact(self):
         self.load_oncall([self.default_oncall_row()], [])
 
@@ -429,6 +456,41 @@ class RuleLoaderOncallCalendarTest(unittest.TestCase):
 
         self.assertIsNotNone(contact)
         self.assertEqual(contact["oncall_reason"], "business_day_time_window")
+
+    def test_excel_numeric_times_work_inside_time_window(self):
+        self.load_oncall([self.excel_time_oncall_row()], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "msp",
+            now=datetime(2026, 6, 18, 8, 30),
+        )
+
+        self.assertIsNotNone(contact)
+        self.assertEqual(contact["user"], "David Silva")
+
+    def test_excel_numeric_times_work_outside_time_window(self):
+        self.load_oncall([self.excel_time_oncall_row()], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "msp",
+            now=datetime(2026, 6, 18, 15, 0),
+        )
+
+        self.assertIsNone(contact)
+
+    def test_excel_numeric_times_keep_weekend_24h_behavior(self):
+        self.load_oncall([self.excel_time_oncall_row()], [])
+
+        contact = self.loader.get_oncall_contact(
+            "client",
+            "msp",
+            now=datetime(2026, 6, 20, 15, 0),
+        )
+
+        self.assertIsNotNone(contact)
+        self.assertEqual(contact["oncall_reason"], "weekend_24h")
 
     def test_business_day_outside_time_window_returns_none(self):
         self.load_oncall([self.default_oncall_row()], [])
