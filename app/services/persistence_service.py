@@ -5,6 +5,8 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from app.db.models import (
     ActionRecord,
     AuditLogRecord,
+    CallAttemptRecord,
+    CallFlowRecord,
     EventRecord,
     IncidentRecord,
     ProcessedEventRecord,
@@ -225,6 +227,286 @@ class PersistenceService:
             session.add(record)
 
         return self._run(operation)
+
+    def create_call_flow(self, event, client, host, target, phone, max_attempts, summary_payload=None):
+
+        def operation(session):
+            record = (
+                session.query(CallFlowRecord)
+                .filter(CallFlowRecord.event_id == getattr(event, "event_id", None))
+                .one_or_none()
+            )
+
+            if record is None:
+                record = CallFlowRecord(
+                    event_id=getattr(event, "event_id", None),
+                    client=client,
+                    host=host,
+                    trigger=getattr(event, "trigger", None),
+                    severity=getattr(event, "severity", None),
+                    target=target,
+                    phone=phone,
+                    state="pending",
+                    max_attempts=max_attempts,
+                    attempt_count=0,
+                    confirmed="false",
+                    next_attempt_at=self._now(),
+                    summary_payload=self._safe_value(summary_payload),
+                )
+                session.add(record)
+                session.flush()
+            else:
+                record.client = client or record.client
+                record.host = host or record.host
+                record.target = target or record.target
+                record.phone = phone or record.phone
+                record.max_attempts = max_attempts or record.max_attempts
+                if summary_payload is not None:
+                    record.summary_payload = self._safe_value(summary_payload)
+
+            return self._call_flow_to_dict(record)
+
+        return self._run(operation)
+
+    def create_call_attempt(self, call_flow_id, event_id, attempt_number, phone):
+
+        def operation(session):
+            record = CallAttemptRecord(
+                call_flow_id=call_flow_id,
+                event_id=event_id,
+                attempt_number=attempt_number,
+                phone=phone,
+                state="created",
+            )
+            session.add(record)
+            session.flush()
+
+            flow = session.query(CallFlowRecord).filter(CallFlowRecord.id == call_flow_id).one_or_none()
+
+            if flow:
+                flow.state = "calling"
+                flow.attempt_count = max(flow.attempt_count or 0, attempt_number)
+
+            return self._call_attempt_to_dict(record)
+
+        return self._run(operation)
+
+    def mark_call_attempt_started(self, event_id, attempt_number, vonage_uuid=None):
+
+        def operation(session):
+            attempt = (
+                session.query(CallAttemptRecord)
+                .filter(CallAttemptRecord.event_id == event_id)
+                .filter(CallAttemptRecord.attempt_number == attempt_number)
+                .one_or_none()
+            )
+
+            if not attempt:
+                return None
+
+            attempt.state = "started"
+            attempt.started_at = self._now()
+            attempt.vonage_uuid = vonage_uuid or attempt.vonage_uuid
+
+            flow = session.query(CallFlowRecord).filter(CallFlowRecord.id == attempt.call_flow_id).one_or_none()
+
+            if flow:
+                flow.state = "waiting_confirmation"
+
+            return self._call_attempt_to_dict(attempt)
+
+        return self._run(operation)
+
+    def mark_call_attempt_event(self, event_id, status, vonage_uuid=None, answered_at=None):
+
+        def operation(session):
+            query = session.query(CallAttemptRecord)
+
+            if vonage_uuid:
+                attempt = query.filter(CallAttemptRecord.vonage_uuid == vonage_uuid).order_by(CallAttemptRecord.id.desc()).first()
+            else:
+                attempt = (
+                    query.filter(CallAttemptRecord.event_id == event_id)
+                    .order_by(CallAttemptRecord.attempt_number.desc())
+                    .first()
+                )
+
+            if not attempt:
+                return None
+
+            normalized = str(status or "").lower()
+
+            if vonage_uuid and not attempt.vonage_uuid:
+                attempt.vonage_uuid = vonage_uuid
+
+            if normalized == "answered":
+                attempt.state = "answered"
+                attempt.answered_at = answered_at or self._now()
+            elif normalized in ("completed", "busy", "failed", "rejected", "timeout", "unanswered", "cancelled"):
+                attempt.state = "completed" if normalized == "completed" else normalized
+                attempt.completed_at = self._now()
+            elif normalized:
+                attempt.state = normalized
+
+            return self._call_attempt_to_dict(attempt)
+
+        return self._run(operation)
+
+    def mark_call_confirmed(self, event_id, digit="1"):
+
+        def operation(session):
+            flow = (
+                session.query(CallFlowRecord)
+                .filter(CallFlowRecord.event_id == event_id)
+                .one_or_none()
+            )
+
+            if not flow:
+                return None
+
+            attempt = (
+                session.query(CallAttemptRecord)
+                .filter(CallAttemptRecord.event_id == event_id)
+                .order_by(CallAttemptRecord.attempt_number.desc())
+                .first()
+            )
+            confirmed_at = self._now()
+            attempt_number = attempt.attempt_number if attempt else None
+
+            if attempt:
+                attempt.state = "confirmed"
+                attempt.confirmed_at = confirmed_at
+                attempt.dtmf_digit = digit
+
+            flow.state = "confirmed"
+            flow.confirmed = "true"
+            flow.confirmed_at = confirmed_at
+            flow.confirmed_attempt = attempt_number
+            flow.next_attempt_at = None
+
+            return {
+                "flow": self._call_flow_to_dict(flow),
+                "attempt": self._call_attempt_to_dict(attempt) if attempt else None,
+            }
+
+        return self._run(operation)
+
+    def mark_call_attempt_no_confirmation(self, event_id, attempt_number):
+
+        def operation(session):
+            attempt = (
+                session.query(CallAttemptRecord)
+                .filter(CallAttemptRecord.event_id == event_id)
+                .filter(CallAttemptRecord.attempt_number == attempt_number)
+                .one_or_none()
+            )
+
+            if attempt:
+                attempt.state = "no_confirmation"
+                attempt.completed_at = self._now()
+
+            return self._call_attempt_to_dict(attempt) if attempt else None
+
+        return self._run(operation)
+
+    def schedule_next_call_attempt(self, event_id, next_attempt_at):
+
+        def operation(session):
+            flow = session.query(CallFlowRecord).filter(CallFlowRecord.event_id == event_id).one_or_none()
+
+            if not flow:
+                return None
+
+            flow.state = "retry_scheduled"
+            flow.next_attempt_at = next_attempt_at
+
+            return self._call_flow_to_dict(flow)
+
+        return self._run(operation)
+
+    def mark_call_flow_manual_required(self, event_id):
+
+        def operation(session):
+            flow = session.query(CallFlowRecord).filter(CallFlowRecord.event_id == event_id).one_or_none()
+
+            if not flow:
+                return None
+
+            flow.state = "manual_required"
+            flow.manual_required_at = self._now()
+            flow.next_attempt_at = None
+
+            return self._call_flow_to_dict(flow)
+
+        return self._run(operation)
+
+    def cancel_pending_call_flows(self, event_id, reason="recovery_received"):
+
+        def operation(session):
+            count = (
+                session.query(CallFlowRecord)
+                .filter(CallFlowRecord.event_id == event_id)
+                .filter(CallFlowRecord.state.in_(["pending", "calling", "waiting_confirmation", "retry_scheduled"]))
+                .update({"state": "cancelled", "next_attempt_at": None})
+            )
+
+            return {"success": True, "count": count, "reason": reason}
+
+        return self._run(operation) or {"success": False, "count": 0, "reason": reason}
+
+    def get_call_flow(self, event_id):
+
+        def operation(session):
+            flow = session.query(CallFlowRecord).filter(CallFlowRecord.event_id == event_id).one_or_none()
+            return self._call_flow_to_dict(flow) if flow else None
+
+        return self._run(operation)
+
+    def _call_flow_to_dict(self, record):
+
+        if not record:
+            return None
+
+        return {
+            "id": record.id,
+            "event_id": record.event_id,
+            "client": record.client,
+            "host": record.host,
+            "trigger": record.trigger,
+            "severity": record.severity,
+            "target": record.target,
+            "phone": record.phone,
+            "state": record.state,
+            "max_attempts": record.max_attempts,
+            "attempt_count": record.attempt_count,
+            "confirmed": record.confirmed == "true",
+            "confirmed_at": record.confirmed_at.isoformat() if record.confirmed_at else None,
+            "confirmed_attempt": record.confirmed_attempt,
+            "manual_required_at": record.manual_required_at.isoformat() if record.manual_required_at else None,
+            "next_attempt_at": record.next_attempt_at.isoformat() if record.next_attempt_at else None,
+            "summary_payload": record.summary_payload,
+        }
+
+    def _call_attempt_to_dict(self, record):
+
+        if not record:
+            return None
+
+        return {
+            "id": record.id,
+            "event_id": record.event_id,
+            "call_flow_id": record.call_flow_id,
+            "attempt_number": record.attempt_number,
+            "phone": record.phone,
+            "vonage_uuid": record.vonage_uuid,
+            "state": record.state,
+            "started_at": record.started_at.isoformat() if record.started_at else None,
+            "answered_at": record.answered_at.isoformat() if record.answered_at else None,
+            "completed_at": record.completed_at.isoformat() if record.completed_at else None,
+            "confirmed_at": record.confirmed_at.isoformat() if record.confirmed_at else None,
+            "dtmf_digit": record.dtmf_digit,
+            "error_message": record.error_message,
+        }
 
     def claim_event_processing(self, event, zabbix_status, client, host):
 

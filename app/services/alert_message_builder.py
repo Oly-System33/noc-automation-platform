@@ -127,16 +127,30 @@ class AlertMessageBuilder:
                 added_action = True
 
             elif action == "calls":
-                lines.append(
-                    "- Llamada realizada: "
-                    f"telefono={result.get('phone')} | "
-                    f"intentos={result.get('attempt_count', 1)} | "
-                    f"estado={result.get('status') or 'desconocido'} | "
-                    f"confirmada={'si' if result.get('confirmed') else 'no'}"
-                )
+                if result.get("confirmed"):
+                    lines.append("- Llamada confirmada por la guardia.")
+                    lines.append(f"  Intento confirmado: {result.get('confirmed_attempt') or result.get('attempt_count')}")
 
-                if result.get("confirmed_at"):
-                    lines.append(f"  Confirmada en: {result.get('confirmed_at')}")
+                    if result.get("confirmed_at"):
+                        lines.append(f"  Hora de confirmación: {result.get('confirmed_at')}")
+
+                elif result.get("manual_required"):
+                    lines.append(
+                        f"- Se realizaron {result.get('attempt_count', 0)} intentos de llamada a la guardia."
+                    )
+                    lines.append("  No se recibió confirmación telefónica.")
+                    lines.append(
+                        "  La gestión telefónica continuará de forma manual/posterior por el equipo NOC."
+                    )
+
+                else:
+                    lines.append(
+                        "- Llamada realizada: "
+                        f"telefono={result.get('phone')} | "
+                        f"intentos={result.get('attempt_count', 1)} | "
+                        f"estado={result.get('status') or 'desconocido'} | "
+                        f"confirmada={'si' if result.get('confirmed') else 'no'}"
+                    )
 
                 if result.get("answered_at"):
                     lines.append(f"  Atendida en: {result.get('answered_at')}")

@@ -97,8 +97,8 @@ class ActionDispatcherResultTest(unittest.TestCase):
         )
 
         self.assertIn("NOC-1", body)
-        self.assertIn("Llamada realizada", body)
-        self.assertIn("confirmada=si", body)
+        self.assertIn("Llamada confirmada por la guardia", body)
+        self.assertIn("Intento confirmado", body)
         self.assertNotIn("technical failure", body)
         self.assertNotIn("Telegram enviado", body)
 

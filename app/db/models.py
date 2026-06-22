@@ -134,3 +134,66 @@ class ScheduledActionRecord(Base):
     cancel_reason = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
     last_error = Column(Text, nullable=True)
+
+
+class CallFlowRecord(Base):
+    __tablename__ = "call_flows"
+    __table_args__ = (
+        Index("ix_call_flows_state_next_attempt_at", "state", "next_attempt_at"),
+        Index("ix_call_flows_event_id", "event_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(String, index=True, nullable=False)
+    client = Column(String, nullable=True)
+    host = Column(String, nullable=True)
+    trigger = Column(Text, nullable=True)
+    severity = Column(String, nullable=True)
+    target = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    state = Column(String, nullable=False, default="pending")
+    max_attempts = Column(Integer, nullable=False, default=3)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    confirmed = Column(String, nullable=False, default="false")
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    confirmed_attempt = Column(Integer, nullable=True)
+    manual_required_at = Column(DateTime(timezone=True), nullable=True)
+    next_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    summary_payload = Column(JSON_TYPE, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class CallAttemptRecord(Base):
+    __tablename__ = "call_attempts"
+    __table_args__ = (
+        UniqueConstraint("event_id", "attempt_number", name="uq_call_attempt_event_attempt"),
+        Index("ix_call_attempts_call_flow_id", "call_flow_id"),
+        Index("ix_call_attempts_vonage_uuid", "vonage_uuid"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(String, index=True, nullable=False)
+    call_flow_id = Column(Integer, nullable=False)
+    attempt_number = Column(Integer, nullable=False)
+    phone = Column(String, nullable=True)
+    vonage_uuid = Column(String, nullable=True)
+    state = Column(String, nullable=False, default="created")
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    answered_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    dtmf_digit = Column(String, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )

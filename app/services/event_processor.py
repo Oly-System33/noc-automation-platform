@@ -160,6 +160,10 @@ class EventProcessor:
             event.event_id,
             reason="recovery_received",
         )
+        cancelled_call_flows = persistence_service.cancel_pending_call_flows(
+            event.event_id,
+            reason="recovery_received",
+        )
 
         if cancelled_actions.get("count"):
             print(
@@ -176,6 +180,7 @@ class EventProcessor:
             details={
                 "event_id": event.event_id,
                 "count": cancelled_actions.get("count"),
+                "cancelled_call_flows": cancelled_call_flows.get("count"),
                 "error": cancelled_actions.get("error"),
             },
         )

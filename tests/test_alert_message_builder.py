@@ -55,6 +55,20 @@ class AlertMessageBuilderTest(unittest.TestCase):
 
         self.assertEqual(actions, ["jira", "telegram", "teams", "calls"])
 
+    def test_email_summary_includes_manual_required_call_result(self):
+        body = AlertMessageBuilder(self.event, self.jira_context()).email_summary_body([
+            {
+                "action": "calls",
+                "success": True,
+                "attempt_count": 3,
+                "manual_required": True,
+            }
+        ])
+
+        self.assertIn("Se realizaron 3 intentos de llamada", body)
+        self.assertIn("No se recibió confirmación telefónica", body)
+        self.assertIn("gestión telefónica continuará", body)
+
 
 if __name__ == "__main__":
     unittest.main()

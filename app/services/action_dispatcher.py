@@ -540,41 +540,30 @@ class ActionDispatcher:
         )
 
         try:
-            result = self.call_service.notify_event_by_call(event, phone, context=context)
+            result = self.call_service.execute_call_flow(
+                event=event,
+                phone=phone,
+                target=contact.get("team") if isinstance(contact, dict) else None,
+                context=context,
+            )
 
         except Exception as e:
             print(f"[{console.level('ERROR')}] Vonage call failed: {e}")
             self._record_action(event, "calls", phone, "failed", error_message=str(e))
             return {"action": "calls", "success": False, "status": "failed"}
 
-        resolved = self.call_service.wait_for_resolution(event.event_id)
-        call_status = (resolved or {}).get("status") or result.get("status")
-        confirmed = bool((resolved or {}).get("confirmed"))
+        call_status = result.get("status")
+        confirmed = bool(result.get("confirmed"))
 
         print(
-            f"[DISPATCH][CALL] {console.cyan('Vonage call created')} -> "
+            f"[DISPATCH][CALL] {console.cyan('Flujo de llamadas finalizado')} -> "
             f"phone={phone} | "
-            f"uuid={result.get('uuid')} | "
+            f"uuid={result.get('call_uuid')} | "
             f"status={call_status} | "
             f"confirmed={confirmed}"
         )
-        response = {
-            **result,
-            "resolution": resolved,
-        }
-        self._record_action(event, "calls", phone, "success", response=response)
-        return {
-            "action": "calls",
-            "success": True,
-            "attempt_count": (resolved or {}).get("attempt_count", 1),
-            "phone": phone,
-            "call_uuid": (resolved or {}).get("uuid") or result.get("uuid"),
-            "status": call_status,
-            "confirmed": confirmed,
-            "confirmed_at": (resolved or {}).get("confirmed_at"),
-            "answered_at": (resolved or {}).get("answered_at"),
-            "final_reason": (resolved or {}).get("final_reason"),
-        }
+        self._record_action(event, "calls", phone, "success", response=result)
+        return result
 
     def _action_jira(self, event, contact, context=None):
 
