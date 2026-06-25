@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from app.models.event_model import ZabbixEvent
@@ -338,6 +339,19 @@ class PersistenceIdempotencyHelpersTest(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertEqual(first, "event-1|availability|noc|calls,jira")
+
+    def test_parse_datetime_accepts_vonage_utc_timestamp(self):
+        parsed = self.service._parse_datetime("2026-06-25T02:36:01.848Z")
+
+        self.assertEqual(
+            parsed,
+            datetime(2026, 6, 25, 2, 36, 1, 848000, tzinfo=timezone.utc),
+        )
+
+    def test_parse_datetime_returns_none_for_invalid_values(self):
+        for value in (None, "", "invalid"):
+            with self.subTest(value=value):
+                self.assertIsNone(self.service._parse_datetime(value))
 
 
 if __name__ == "__main__":

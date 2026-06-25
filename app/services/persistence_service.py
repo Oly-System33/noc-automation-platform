@@ -58,6 +58,30 @@ class PersistenceService:
 
         return str(value)
 
+    def _parse_datetime(self, value):
+
+        if value is None:
+            return None
+
+        if isinstance(value, datetime):
+            return value
+
+        if isinstance(value, str):
+            value = value.strip()
+
+            if not value:
+                return None
+
+            if value.endswith("Z"):
+                value = value[:-1] + "+00:00"
+
+            try:
+                return datetime.fromisoformat(value)
+            except ValueError:
+                return None
+
+        return None
+
     def _event_payload(self, event):
 
         raw_payload = getattr(event, "raw_payload", None)
@@ -341,7 +365,7 @@ class PersistenceService:
 
             if normalized == "answered":
                 attempt.state = "answered"
-                attempt.answered_at = answered_at or self._now()
+                attempt.answered_at = self._parse_datetime(answered_at) or self._now()
             elif normalized in ("completed", "busy", "failed", "rejected", "timeout", "unanswered", "cancelled"):
                 attempt.state = "completed" if normalized == "completed" else normalized
                 attempt.completed_at = self._now()
