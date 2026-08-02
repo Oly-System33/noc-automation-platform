@@ -111,5 +111,6 @@ The service is read-only. It does not commit, update workflow state, execute an
 integration, or expose contact payloads and phone numbers. Database failures
 raise a controlled internal exception instead of returning an empty dashboard.
 
-There are no dashboard HTTP endpoints yet. The service is the internal query
-layer that a future API will call.
+The dashboard HTTP API exposes summary, incident, operation, and approval
+queries through this service. Workflow mutations such as pause, resume, and
+approval reuse the existing scheduled action business services.

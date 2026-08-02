@@ -132,6 +132,22 @@ def build_demo_records(now=None):
             attempt_count=1,
         ),
         _build_scheduled_action(
+            "stuck",
+            "processing",
+            now,
+            scheduled_at=now + timedelta(hours=1),
+            processing_started_at=now - timedelta(minutes=30),
+            attempt_count=1,
+        ),
+        _build_scheduled_action(
+            "closed",
+            "executed",
+            now,
+            scheduled_at=now - timedelta(minutes=20),
+            attempt_count=1,
+            executed_at=now - timedelta(minutes=5),
+        ),
+        _build_scheduled_action(
             "failed",
             "failed",
             now,

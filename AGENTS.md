@@ -2,168 +2,142 @@
 
 ## Project context
 
-This is a Python/FastAPI NOC Automation Platform.
+This repository is a NOC incident automation platform running on Python
+3.13.11. A local virtual environment already exists at `.venv`; do not create
+another one and install only the minimum required dependencies.
 
-The project uses Python 3.13.11.
+The current event pipeline is:
 
-A local virtual environment already exists in the repository as:
-
-.venv
-
-Do not create a new virtual environment.
-
-Use the existing environment and install only the minimum required dependencies.
-
-Current pipeline:
-
+```text
 Zabbix webhook
-→ ZabbixEvent
-→ EventProcessor
-→ RuleEngine
-→ RuleLoader using Excel runbooks
-→ ActionDispatcher
-→ channel handlers: email, telegram, teams, jira, calls
+-> ZabbixEvent
+-> EventProcessor
+-> RuleEngine
+-> RuleLoader using Excel runbooks
+-> ActionDispatcher
+-> email, Telegram, Teams, Jira, and Vonage Voice handlers
+```
 
-The "calls" action is implemented using Vonage Voice.
+## Stack
 
-This is an automation project for NOC incident handling.
+```text
+Python
+FastAPI
+SQLAlchemy
+PostgreSQL
+Pydantic
+unittest
+Excel runbooks
+```
 
-## Architecture style
+## Architecture
 
-Prefer composition over inheritance.
+Prefer composition over inheritance. Keep services and integration classes
+small, explicit, and consistent with the existing code. Do not introduce a
+framework, plugin system, dependency injection container, repository pattern,
+or async redesign. Make the smallest safe production-grade change and do not
+refactor unrelated code.
 
-Keep classes small and explicit.
+Do not rename public interfaces or alter the RuleEngine flow unless a task
+explicitly requires it. Do not change Jira, email, Telegram, Teams, Zabbix,
+Vonage, or Excel parsing logic as part of unrelated work.
 
-Use service/integration classes, consistent with the current project style.
+## Persistence
 
-Do not introduce unnecessary abstractions.
+SQLAlchemy persists the operational state in PostgreSQL using these tables:
 
-Do not introduce a framework, plugin system, dependency injection container, repository pattern, or async redesign.
+```text
+events
+incidents
+actions
+audit_logs
+processed_events
+scheduled_actions
+call_flows
+call_attempts
+```
 
-Use simple Python code.
+Incident, scheduled action, call flow, and call attempt state must not be
+described as exclusively in-memory. Some runtime coordination may still use
+process memory, but PostgreSQL is the source used by the dashboard backend.
 
-## Critical constraints
+## Scheduled actions
 
-Do not refactor unrelated code.
+The persisted scheduled action states are:
 
-Do not rename existing files, classes, methods, folders, or public interfaces unless explicitly requested.
+```text
+pending
+pending_approval
+paused
+processing
+executed
+failed
+cancelled
+```
 
-Do not change the existing RuleEngine flow unless strictly necessary.
+Manual pause and resume use direct transitions:
 
-Do not change Jira, Email, Telegram, Teams, Zabbix, Vonage, or Excel parsing logic except where explicitly required.
+```text
+pending -> paused
+paused -> processing
+```
 
-Do not modify the runbook structure.
+Resume means immediate execution and must not return an action to `pending`.
+The API and CLI must reuse the existing persistence, worker, and executor
+services instead of duplicating worker logic.
 
-Do not implement dynamic on-call scheduling yet.
+## Dashboard backend MVP
 
-Do not add a new Excel sheet yet.
+The backend includes:
 
-Do not hardcode the destination phone number.
+```text
+DashboardQueryService
+dashboard schemas and visible status resolvers
+summary API
+incidents API
+operations API
+approvals API
+pause API
+resume API
+approval API
+CORS configuration
+dashboard demo data
+```
 
-Do not read the destination phone number from .env.
+Keep internal workflow states separate from dashboard-visible states. The
+frontend must use the API and must never access PostgreSQL directly. Dashboard
+responses must not expose secrets, contact payloads, phone numbers, or other
+integration credentials.
 
-The destination phone number must come from the existing runbook contact dictionary:
+## External integrations and runbooks
 
-contact["phone"]
+Do not hardcode secrets or destination phone numbers. A call destination must
+come from the existing runbook contact dictionary as `contact["phone"]`, never
+from `.env`. `PUBLIC_BASE_URL` is the public callback base URL used by Vonage.
 
-The user will manually place the test phone number in the existing runbook contacts sheet.
+Do not modify the runbook structure, add an Excel sheet, or implement dynamic
+on-call scheduling without an explicit task. Do not modify customer runbooks as
+part of application changes.
 
-Make the smallest safe production-grade change.
+## Future modification rules
 
-## Implementation goal
+- Do not duplicate scheduled worker or execution logic.
+- Reuse business services from API and CLI entry points.
+- Do not allow frontend access to PostgreSQL.
+- Do not expose secrets or contact details.
+- Keep tests in the existing `unittest` suite.
+- Do not modify runbooks without an explicit task.
+- Do not add Redis without a later architectural decision.
+- Keep internal states and visible dashboard states separate.
+- Do not modify unrelated dependencies.
 
-Maintain real Vonage Voice calls for the existing "calls" action.
+The app must continue to start with `uvicorn app.main:app --reload`, and a fake
+Zabbix event must remain testable through `POST /zabbix/webhook`.
 
-Current expected behavior:
+## Next stage
 
-When the RuleEngine dispatches action "calls", ActionDispatcher._action_calls(event, contact) must:
+```text
+Frontend dashboard MVP
+```
 
-1. Resolve the phone number from contact["phone"].
-2. Build a voice alert message from the event.
-3. Trigger an outbound Vonage call to that phone.
-4. The call must play the alert message.
-5. The call must offer IVR:
-   - Press 1 to confirm receipt.
-   - Press 2 to repeat the message.
-
-## Runtime/environment
-
-Use these environment variables:
-
-VONAGE_APPLICATION_ID
-VONAGE_PRIVATE_KEY_PATH
-VONAGE_FROM_NUMBER
-VONAGE_API_BASE_URL
-PUBLIC_BASE_URL
-
-Do not hardcode secrets.
-
-The called phone number must come from the runbook contact.
-
-PUBLIC_BASE_URL must be the public URL used by Vonage to reach FastAPI callbacks.
-
-## Dependencies
-
-Do not modify unrelated dependencies.
-
-If requirements.txt exists, update it only as needed.
-
-## Preferred file layout
-
-Add new files only if needed:
-
-app/integrations/vonage_voice.py
-app/services/call_service.py
-app/api/vonage_webhook.py
-
-Modify existing files only if needed:
-
-app/main.py
-app/services/action_dispatcher.py
-
-## Vonage requirements
-
-Required endpoints:
-
-GET /vonage/answer
-POST /vonage/input
-POST /vonage/event
-
-Store active call events in memory for now, keyed by event_id.
-
-This in-memory store is acceptable for the current demo.
-
-## Testing requirements
-
-Do not create a large test framework unless requested.
-
-The app must still start with:
-
-uvicorn app.main:app --reload
-
-Manual test must be possible by sending a fake Zabbix PROBLEM event to:
-
-POST /zabbix/webhook
-
-The fake event should trigger the normal existing pipeline.
-
-The runbook must determine the action "calls" and the target contact.
-
-The target contact must contain a phone field.
-
-## Output requirements
-
-Before editing, explain the planned file changes.
-
-After editing, show:
-
-1. files changed
-2. commands to install dependencies
-3. environment variables needed
-4. commands to run
-5. curl/manual test through /zabbix/webhook
-6. git status
-7. proposed git add command
-8. proposed git commit command
-
-Do not commit automatically.
+No frontend stack has been selected yet.

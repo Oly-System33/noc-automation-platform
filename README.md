@@ -139,15 +139,63 @@ curl -X POST http://3.89.189.230:8000/zabbix/webhook \
   }'
 ```
 
-## Local Development
+## Dashboard Backend MVP
+
+### Local execution
+
+PostgreSQL must be running before initializing the schema or starting the API.
 
 ```bash
-.venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+source .venv/bin/activate
+python -m app.db.init_db
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-## Dashboard demo data
+To expose callbacks during local development, run in another terminal:
 
-Create and verify synthetic dashboard records for the `Banco Demo` client:
+```bash
+ngrok http 8000
+```
+
+### Endpoints
+
+```text
+GET  /health
+GET  /api/dashboard/summary
+GET  /api/incidents
+GET  /api/operations
+GET  /api/approvals
+
+POST /api/scheduled-actions/{scheduled_action_id}/pause
+POST /api/scheduled-actions/{scheduled_action_id}/resume
+POST /api/scheduled-actions/{scheduled_action_id}/approve
+```
+
+Relevant scheduled action transitions are:
+
+```text
+pending -> paused
+paused -> processing -> executed/failed
+pending_approval -> state selected by the existing approval logic
+paused + RECOVERY -> cancelled
+```
+
+Resuming a paused action starts immediate execution; it does not return the
+action to `pending`.
+
+### CORS
+
+Local browser origins can be configured with:
+
+```text
+CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+```
+
+Production deployments must configure only the real frontend origins.
+
+### Demo data
+
+Create, verify, or remove synthetic records for the `Banco Demo` client:
 
 ```bash
 python scripts/seed_dashboard_demo.py
@@ -155,7 +203,6 @@ python scripts/seed_dashboard_demo.py --verify
 python scripts/seed_dashboard_demo.py --clean
 ```
 
-The script writes directly through the existing SQLAlchemy session and does
-not trigger webhooks, workers, or external integrations. These records are
-only for dashboard demonstrations and must not be used as production seed
-data.
+The script inserts synthetic data without executing external integrations. It
+is intended only for dashboard demonstrations and must not be used as a
+production data load.
