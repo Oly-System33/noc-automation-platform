@@ -9,10 +9,23 @@ venv/
 
 # Environment variables
 .env
+.env.local
 *.key
+*.pem
 
 # Logs
 *.log
+logs/
+
+# Test and local data
+.pytest_cache/
+*.db
+*.sqlite
+*.sqlite3
+*.tmp
+ngrok.yml
+postgres_data/
+pgdata/
 
 # Mac
 .DS_Store
@@ -28,4 +41,6 @@ data/embeddings/
 data/runbooks/*
 !data/runbooks/runbook_template.xlsx
 !data/runbooks/README.md
+runbooks/*.xlsx
+Banco X.xlsx
 private.key
