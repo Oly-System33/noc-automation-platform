@@ -70,3 +70,46 @@ does not query PostgreSQL, import SQLAlchemy, read environment variables, or
 call an external service. Callers provide the relevant internal states and
 timestamps. If `now` is omitted, the resolver uses the current UTC time. All
 datetime comparisons are normalized to UTC.
+
+## Read-Only Query Service
+
+`DashboardQueryService` builds dashboard response models from these tables:
+
+```text
+incidents
+events
+processed_events
+scheduled_actions
+call_flows
+actions
+```
+
+`IncidentRecord.event_id` is the anchor. Related rows are loaded with grouped
+`event_id IN (...)` queries and organized in memory. The service never executes
+a related query inside the incident loop, so the number of queries does not
+grow with the number of returned incidents.
+
+The representative scheduled action is selected by operational precedence:
+
+```text
+stuck processing
+failed
+pending_approval
+processing
+paused
+pending
+cancelled
+executed
+```
+
+Equal states are resolved by their best state-specific timestamp and then by
+the highest record ID. All scheduled states are still passed to
+`resolve_dashboard_status`, so selecting one representative row does not hide
+a higher-priority operation.
+
+The service is read-only. It does not commit, update workflow state, execute an
+integration, or expose contact payloads and phone numbers. Database failures
+raise a controlled internal exception instead of returning an empty dashboard.
+
+There are no dashboard HTTP endpoints yet. The service is the internal query
+layer that a future API will call.
