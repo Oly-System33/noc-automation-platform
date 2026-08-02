@@ -52,6 +52,18 @@ def init_db():
             "ADD COLUMN IF NOT EXISTS pre_target VARCHAR"
         ))
         connection.execute(text(
+            "ALTER TABLE scheduled_actions "
+            "ADD COLUMN IF NOT EXISTS paused_at TIMESTAMP WITH TIME ZONE"
+        ))
+        connection.execute(text(
+            "ALTER TABLE scheduled_actions "
+            "ADD COLUMN IF NOT EXISTS resumed_at TIMESTAMP WITH TIME ZONE"
+        ))
+        connection.execute(text(
+            "ALTER TABLE scheduled_actions "
+            "ADD COLUMN IF NOT EXISTS pause_reason TEXT"
+        ))
+        connection.execute(text(
             "CREATE INDEX IF NOT EXISTS "
             "ix_scheduled_actions_state_scheduled_at "
             "ON scheduled_actions (state, scheduled_at)"

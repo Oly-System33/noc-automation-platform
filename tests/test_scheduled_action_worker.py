@@ -236,7 +236,7 @@ class ScheduledActionWorkerTest(unittest.TestCase):
 
         worker = ScheduledActionWorker(dispatcher=FakeDispatcher())
 
-        with patch("app.services.scheduled_action_worker.rule_loader", FakeRuleLoader()):
+        with patch("app.services.scheduled_action_executor.rule_loader", FakeRuleLoader()):
             result = worker._execute_scheduled_action(scheduled_action)
 
         self.assertTrue(result["success"])
@@ -294,7 +294,7 @@ class ScheduledActionWorkerTest(unittest.TestCase):
 
         worker = ScheduledActionWorker(dispatcher=FakeDispatcher())
 
-        with patch("app.services.scheduled_action_worker.rule_loader", FakeRuleLoader()):
+        with patch("app.services.scheduled_action_executor.rule_loader", FakeRuleLoader()):
             result = worker._execute_scheduled_action(scheduled_action)
 
         self.assertTrue(result["success"])

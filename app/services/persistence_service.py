@@ -241,16 +241,26 @@ class PersistenceService:
     def record_audit_log(self, event_id, level, component, message, details=None):
 
         def operation(session):
-            record = AuditLogRecord(
+            self._add_audit_log(
+                session,
                 event_id=event_id,
                 level=level,
                 component=component,
                 message=message,
-                details=self._safe_value(details),
+                details=details,
             )
-            session.add(record)
 
         return self._run(operation)
+
+    def _add_audit_log(self, session, event_id, level, component, message, details=None):
+
+        session.add(AuditLogRecord(
+            event_id=event_id,
+            level=level,
+            component=component,
+            message=message,
+            details=self._safe_value(details),
+        ))
 
     def create_call_flow(self, event, client, host, target, phone, max_attempts, summary_payload=None):
 
@@ -796,9 +806,272 @@ class PersistenceService:
             "scheduled_at": record.scheduled_at,
             "state": record.state,
             "created_at": record.created_at,
+            "paused_at": record.paused_at,
+            "resumed_at": record.resumed_at,
+            "pause_reason": record.pause_reason,
+            "processing_started_at": record.processing_started_at,
             "attempt_count": record.attempt_count,
+            "cancel_reason": record.cancel_reason,
+            "last_error": record.last_error,
             "dedupe_key": record.dedupe_key,
         }
+
+    def list_paused_scheduled_actions(self):
+
+        session = SessionLocal()
+
+        try:
+            records = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.state == "paused")
+                .order_by(ScheduledActionRecord.paused_at)
+                .all()
+            )
+
+            return [self._scheduled_action_to_dict(record) for record in records]
+
+        except Exception as e:
+            print(f"[{console.level('ERROR')}] Database operation failed: {e}")
+            return []
+
+        finally:
+            session.close()
+
+    def pause_scheduled_action(self, scheduled_action_id, reason="manual_pause"):
+
+        session = SessionLocal()
+        paused_at = self._now()
+        pause_reason = str(reason or "").strip() or "manual_pause"
+
+        try:
+            updated = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.id == scheduled_action_id)
+                .filter(ScheduledActionRecord.state == "pending")
+                .update({
+                    "state": "paused",
+                    "paused_at": paused_at,
+                    "pause_reason": pause_reason,
+                    "processing_started_at": None,
+                })
+            )
+
+            if updated == 1:
+                record = (
+                    session.query(ScheduledActionRecord)
+                    .filter(ScheduledActionRecord.id == scheduled_action_id)
+                    .one()
+                )
+                self._add_audit_log(
+                    session,
+                    event_id=record.event_id,
+                    level="INFO",
+                    component="scheduled_actions",
+                    message="Scheduled action paused",
+                    details={
+                        "scheduled_action_id": scheduled_action_id,
+                        "event_id": record.event_id,
+                        "previous_state": "pending",
+                        "new_state": "paused",
+                        "pause_reason": pause_reason,
+                        "paused_at": paused_at,
+                    },
+                )
+                session.commit()
+
+                return {
+                    "success": True,
+                    "scheduled_action_id": scheduled_action_id,
+                    "previous_state": "pending",
+                    "state": "paused",
+                    "error": None,
+                }
+
+            record = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.id == scheduled_action_id)
+                .one_or_none()
+            )
+            session.rollback()
+
+            if not record:
+                return {
+                    "success": False,
+                    "scheduled_action_id": scheduled_action_id,
+                    "previous_state": None,
+                    "state": None,
+                    "error": "scheduled_action_not_found",
+                }
+
+            return {
+                "success": False,
+                "scheduled_action_id": scheduled_action_id,
+                "previous_state": record.state,
+                "state": record.state,
+                "error": "invalid_state_transition",
+            }
+
+        except Exception as e:
+            session.rollback()
+            print(f"[{console.level('ERROR')}] Database operation failed: {e}")
+            return {
+                "success": False,
+                "scheduled_action_id": scheduled_action_id,
+                "previous_state": None,
+                "state": None,
+                "error": "internal_error",
+            }
+
+        finally:
+            session.close()
+
+    def claim_paused_action_for_immediate_execution(self, scheduled_action_id):
+
+        session = SessionLocal()
+
+        try:
+            record = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.id == scheduled_action_id)
+                .with_for_update()
+                .one_or_none()
+            )
+
+            if not record:
+                session.rollback()
+                return {
+                    "success": False,
+                    "scheduled_action_id": scheduled_action_id,
+                    "previous_state": None,
+                    "state": None,
+                    "error": "scheduled_action_not_found",
+                }
+
+            if record.state != "paused":
+                state = record.state
+                session.rollback()
+                return {
+                    "success": False,
+                    "scheduled_action_id": scheduled_action_id,
+                    "previous_state": state,
+                    "state": state,
+                    "error": "invalid_state_transition",
+                }
+
+            incident = (
+                session.query(IncidentRecord)
+                .filter(IncidentRecord.event_id == record.event_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            now = self._now()
+
+            if not incident or incident.current_status != "open":
+                updated = (
+                    session.query(ScheduledActionRecord)
+                    .filter(ScheduledActionRecord.id == scheduled_action_id)
+                    .filter(ScheduledActionRecord.state == "paused")
+                    .update({
+                        "state": "cancelled",
+                        "cancelled_at": now,
+                        "cancel_reason": "incident_not_open",
+                        "processing_started_at": None,
+                    })
+                )
+
+                if updated != 1:
+                    session.rollback()
+                    return {
+                        "success": False,
+                        "scheduled_action_id": scheduled_action_id,
+                        "previous_state": record.state,
+                        "state": record.state,
+                        "error": "invalid_state_transition",
+                    }
+
+                self._add_audit_log(
+                    session,
+                    event_id=record.event_id,
+                    level="WARNING",
+                    component="scheduled_actions",
+                    message="Scheduled action resume rejected",
+                    details={
+                        "scheduled_action_id": scheduled_action_id,
+                        "event_id": record.event_id,
+                        "reason": "incident_not_open",
+                        "new_state": "cancelled",
+                    },
+                )
+                session.commit()
+
+                return {
+                    "success": False,
+                    "scheduled_action_id": scheduled_action_id,
+                    "previous_state": "paused",
+                    "state": "cancelled",
+                    "error": "incident_not_open",
+                }
+
+            updated = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.id == scheduled_action_id)
+                .filter(ScheduledActionRecord.state == "paused")
+                .update({
+                    "state": "processing",
+                    "resumed_at": now,
+                    "processing_started_at": now,
+                })
+            )
+
+            if updated != 1:
+                session.rollback()
+                return {
+                    "success": False,
+                    "scheduled_action_id": scheduled_action_id,
+                    "previous_state": record.state,
+                    "state": record.state,
+                    "error": "invalid_state_transition",
+                }
+
+            self._add_audit_log(
+                session,
+                event_id=record.event_id,
+                level="INFO",
+                component="scheduled_actions",
+                message="Scheduled action resumed for immediate execution",
+                details={
+                    "scheduled_action_id": scheduled_action_id,
+                    "event_id": record.event_id,
+                    "previous_state": "paused",
+                    "new_state": "processing",
+                    "scheduled_at": record.scheduled_at,
+                    "resumed_at": now,
+                    "execution_mode": "immediate",
+                },
+            )
+            session.commit()
+
+            return {
+                "success": True,
+                "scheduled_action_id": scheduled_action_id,
+                "previous_state": "paused",
+                "state": "processing",
+                "error": None,
+            }
+
+        except Exception as e:
+            session.rollback()
+            print(f"[{console.level('ERROR')}] Database operation failed: {e}")
+            return {
+                "success": False,
+                "scheduled_action_id": scheduled_action_id,
+                "previous_state": None,
+                "state": None,
+                "error": "internal_error",
+            }
+
+        finally:
+            session.close()
 
     def claim_scheduled_action(self, scheduled_action_id):
 
@@ -961,7 +1234,7 @@ class PersistenceService:
             count = (
                 session.query(ScheduledActionRecord)
                 .filter(ScheduledActionRecord.event_id == event_id)
-                .filter(ScheduledActionRecord.state.in_(["pending", "pending_approval"]))
+                .filter(ScheduledActionRecord.state.in_(["pending", "pending_approval", "paused"]))
                 .update({
                     "state": "cancelled",
                     "cancelled_at": self._now(),

@@ -3,6 +3,7 @@ import os
 from fastapi import FastAPI
 
 from app.api.health import router as health_router
+from app.api.scheduled_actions import router as scheduled_actions_router
 from app.api.vonage_webhook import router as vonage_router
 from app.api.zabbix_webhook import router as zabbix_router
 from app.services.console import console
@@ -16,6 +17,7 @@ from app.services.scheduled_action_worker import (
 app = FastAPI()
 
 app.include_router(health_router)
+app.include_router(scheduled_actions_router)
 app.include_router(zabbix_router)
 app.include_router(vonage_router)
 
