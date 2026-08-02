@@ -1,3 +1,4 @@
+import logging
 import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -21,11 +22,10 @@ from app.schemas.dashboard import (
     DashboardSummaryResponse,
     resolve_dashboard_status,
 )
-from app.services.console import console
-
-
 MAX_DASHBOARD_LIMIT = 500
 MAX_ERROR_LENGTH = 500
+
+logger = logging.getLogger(__name__)
 
 SCHEDULED_ACTION_PRIORITY = {
     "failed": 1,
@@ -72,12 +72,31 @@ class DashboardQueryService:
             lambda: datetime.now(timezone.utc)
         )
 
-    def list_incidents(self, limit=100):
+    def list_incidents(self, limit=100, client=None, status=None):
         limit = max(1, min(int(limit), MAX_DASHBOARD_LIMIT))
+        client_filter = str(client).strip().casefold() if client else None
+        status_filter = DashboardStatus(status) if status is not None else None
+        has_filters = client_filter is not None or status_filter is not None
         generated_at, items, total = self._load_items(
-            limit=limit,
-            include_total=True,
+            limit=None if has_filters else limit,
+            include_total=not has_filters,
         )
+
+        if status_filter is not None:
+            items = [
+                item for item in items
+                if item.display_status == status_filter
+            ]
+
+        if client_filter is not None:
+            items = [
+                item for item in items
+                if str(item.client or "").strip().casefold() == client_filter
+            ]
+
+        if has_filters:
+            total = len(items)
+            items = items[:limit]
 
         return DashboardIncidentListResponse(
             items=items,
@@ -183,9 +202,9 @@ class DashboardQueryService:
         except SQLAlchemyError as e:
             if session is not None:
                 session.rollback()
-            print(
-                f"[{console.level('ERROR')}] "
-                "Dashboard query failed"
+            logger.error(
+                "Dashboard query failed: %s",
+                type(e).__name__,
             )
             raise DashboardQueryError("dashboard_query_failed") from e
 

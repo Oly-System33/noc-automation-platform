@@ -590,6 +590,93 @@ class DashboardQueryServiceTest(unittest.TestCase):
         self.assertEqual(len(response.items), 500)
         self.assertEqual(response.total, 502)
 
+    def test_status_filter_is_applied_before_limit_and_total(self):
+        incidents = [
+            make_incident("active", record_id=1, updated_at=NOW),
+            make_incident(
+                "paused-newer",
+                record_id=2,
+                updated_at=NOW - timedelta(minutes=1),
+            ),
+            make_incident(
+                "paused-older",
+                record_id=3,
+                updated_at=NOW - timedelta(minutes=2),
+            ),
+        ]
+        scheduled = [
+            make_scheduled("paused", event_id="paused-newer"),
+            make_scheduled("paused", event_id="paused-older", record_id=2),
+        ]
+        service, session = self.build_service({
+            IncidentRecord: incidents,
+            ScheduledActionRecord: scheduled,
+        })
+
+        response = service.list_incidents(
+            limit=1,
+            status=DashboardStatus.PAUSED,
+        )
+
+        self.assertEqual(response.total, 2)
+        self.assertEqual(
+            [item.event_id for item in response.items],
+            ["paused-newer"],
+        )
+        self.assertEqual(session.execution_count, 6)
+
+    def test_client_filter_is_exact_case_insensitive_and_before_limit(self):
+        incidents = [
+            make_incident("banco-x-newer", record_id=1, client="Banco X"),
+            make_incident(
+                "other",
+                record_id=2,
+                client="Banco XY",
+                updated_at=NOW - timedelta(minutes=1),
+            ),
+            make_incident(
+                "banco-x-older",
+                record_id=3,
+                client="banco x",
+                updated_at=NOW - timedelta(minutes=2),
+            ),
+        ]
+        service, _ = self.build_service({IncidentRecord: incidents})
+
+        response = service.list_incidents(limit=1, client=" BANCO X ")
+
+        self.assertEqual(response.total, 2)
+        self.assertEqual(
+            [item.event_id for item in response.items],
+            ["banco-x-newer"],
+        )
+
+    def test_combined_filters_and_empty_results(self):
+        incidents = [
+            make_incident("matching", record_id=1, client="Banco X"),
+            make_incident("active", record_id=2, client="Banco X"),
+            make_incident("other-client", record_id=3, client="Banco Y"),
+        ]
+        scheduled = [
+            make_scheduled("paused", event_id="matching"),
+            make_scheduled("paused", event_id="other-client", record_id=2),
+        ]
+        service, _ = self.build_service({
+            IncidentRecord: incidents,
+            ScheduledActionRecord: scheduled,
+        })
+
+        response = service.list_incidents(
+            client="banco x",
+            status=DashboardStatus.PAUSED,
+        )
+        empty = service.list_incidents(client="missing")
+
+        self.assertEqual(response.total, 1)
+        self.assertEqual(response.items[0].event_id, "matching")
+        self.assertEqual(empty.total, 0)
+        self.assertEqual(empty.items, [])
+
     def test_query_count_is_constant_and_empty_skips_related_queries(self):
         for incident_count in (1, 100):
             with self.subTest(incident_count=incident_count):

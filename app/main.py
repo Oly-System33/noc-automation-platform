@@ -2,6 +2,7 @@ import os
 
 from fastapi import FastAPI
 
+from app.api.dashboard import dashboard_router, incidents_router
 from app.api.health import router as health_router
 from app.api.scheduled_actions import router as scheduled_actions_router
 from app.api.vonage_webhook import router as vonage_router
@@ -17,6 +18,8 @@ from app.services.scheduled_action_worker import (
 app = FastAPI()
 
 app.include_router(health_router)
+app.include_router(dashboard_router)
+app.include_router(incidents_router)
 app.include_router(scheduled_actions_router)
 app.include_router(zabbix_router)
 app.include_router(vonage_router)
