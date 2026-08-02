@@ -5,12 +5,17 @@ from datetime import datetime, timedelta, timezone
 from pydantic import ValidationError
 
 from app.schemas.dashboard import (
+    DashboardApprovalListResponse,
     DashboardIncidentItem,
     DashboardIncidentListResponse,
+    DashboardOperationItem,
+    DashboardOperationListResponse,
+    DashboardOperationStatus,
     DashboardStatus,
     DashboardStatusCounts,
     DashboardSummaryResponse,
     resolve_dashboard_status,
+    resolve_operation_status,
 )
 
 
@@ -367,6 +372,96 @@ class DashboardModelsTest(unittest.TestCase):
                 event_id="event-1",
                 display_status="unknown",
             )
+
+
+class DashboardOperationStatusResolverTest(unittest.TestCase):
+
+    def test_enum_contains_exact_operation_status_contract(self):
+        self.assertEqual(
+            [status.value for status in DashboardOperationStatus],
+            [
+                "scheduled",
+                "pending_approval",
+                "paused",
+                "executing",
+                "stuck",
+                "executed",
+                "failed",
+                "cancelled",
+            ],
+        )
+
+    def test_non_processing_states_are_mapped(self):
+        cases = [
+            ("pending", DashboardOperationStatus.SCHEDULED),
+            (
+                "pending_approval",
+                DashboardOperationStatus.PENDING_APPROVAL,
+            ),
+            ("paused", DashboardOperationStatus.PAUSED),
+            ("executed", DashboardOperationStatus.EXECUTED),
+            ("failed", DashboardOperationStatus.FAILED),
+            ("cancelled", DashboardOperationStatus.CANCELLED),
+        ]
+
+        for state, expected in cases:
+            with self.subTest(state=state):
+                self.assertEqual(
+                    resolve_operation_status(state=state, now=NOW),
+                    expected,
+                )
+
+    def test_recent_processing_is_executing(self):
+        status = resolve_operation_status(
+            state="processing",
+            processing_started_at=NOW - timedelta(minutes=9),
+            now=NOW,
+        )
+
+        self.assertEqual(status, DashboardOperationStatus.EXECUTING)
+
+    def test_stale_processing_is_stuck_at_timeout_boundary(self):
+        status = resolve_operation_status(
+            state="processing",
+            processing_started_at=NOW - timedelta(minutes=10),
+            now=NOW,
+        )
+
+        self.assertEqual(status, DashboardOperationStatus.STUCK)
+
+    def test_unknown_state_raises_controlled_error(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "unsupported_operation_state",
+        ):
+            resolve_operation_status(state="unknown", now=NOW)
+
+    def test_operation_models_serialize_without_sensitive_fields(self):
+        item = DashboardOperationItem(
+            scheduled_action_id=42,
+            event_id="event-1",
+            action="jira",
+            internal_state="paused",
+            display_status=DashboardOperationStatus.PAUSED,
+            created_at=NOW,
+        )
+        operation_response = DashboardOperationListResponse(
+            items=[item],
+            total=1,
+            generated_at=NOW,
+        )
+        approval_response = DashboardApprovalListResponse(
+            items=[item],
+            total=1,
+            generated_at=NOW,
+        )
+        payload = json.loads(operation_response.model_dump_json())
+
+        self.assertEqual(payload["items"][0]["display_status"], "paused")
+        self.assertNotIn("phone", payload["items"][0])
+        self.assertNotIn("email", payload["items"][0])
+        self.assertNotIn("updated_at", payload["items"][0])
+        self.assertEqual(approval_response.total, 1)
 
 
 if __name__ == "__main__":

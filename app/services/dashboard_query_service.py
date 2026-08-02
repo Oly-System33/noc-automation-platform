@@ -15,12 +15,17 @@ from app.db.models import (
 )
 from app.db.session import SessionLocal
 from app.schemas.dashboard import (
+    DashboardApprovalListResponse,
     DashboardIncidentItem,
     DashboardIncidentListResponse,
+    DashboardOperationItem,
+    DashboardOperationListResponse,
+    DashboardOperationStatus,
     DashboardStatus,
     DashboardStatusCounts,
     DashboardSummaryResponse,
     resolve_dashboard_status,
+    resolve_operation_status,
 )
 MAX_DASHBOARD_LIMIT = 500
 MAX_ERROR_LENGTH = 500
@@ -123,6 +128,205 @@ class DashboardQueryService:
             by_client=dict(sorted(by_client.items())),
             total=len(items),
         )
+
+    def list_operations(
+        self,
+        *,
+        limit: int = 100,
+        client: str | None = None,
+        status: DashboardOperationStatus | None = None,
+    ) -> DashboardOperationListResponse:
+        limit = max(1, min(int(limit), MAX_DASHBOARD_LIMIT))
+        client_filter = str(client).strip().casefold() if client else None
+        status_filter = (
+            DashboardOperationStatus(status) if status is not None else None
+        )
+        generated_at, items = self._load_operation_items(
+            approval_only=False,
+        )
+
+        if client_filter is not None:
+            items = [
+                item for item in items
+                if str(item.client or "").strip().casefold() == client_filter
+            ]
+
+        if status_filter is not None:
+            items = [
+                item for item in items
+                if item.display_status == status_filter
+            ]
+
+        return DashboardOperationListResponse(
+            items=items[:limit],
+            total=len(items),
+            generated_at=generated_at,
+        )
+
+    def list_approvals(
+        self,
+        *,
+        limit: int = 100,
+        client: str | None = None,
+    ) -> DashboardApprovalListResponse:
+        limit = max(1, min(int(limit), MAX_DASHBOARD_LIMIT))
+        client_filter = str(client).strip().casefold() if client else None
+        generated_at, items = self._load_operation_items(
+            approval_only=True,
+        )
+
+        if client_filter is not None:
+            items = [
+                item for item in items
+                if str(item.client or "").strip().casefold() == client_filter
+            ]
+
+        return DashboardApprovalListResponse(
+            items=items[:limit],
+            total=len(items),
+            generated_at=generated_at,
+        )
+
+    def _load_operation_items(self, *, approval_only):
+        session = None
+        generated_at = self._as_utc(self._now_provider())
+
+        try:
+            session = self._session_factory()
+            query = session.query(ScheduledActionRecord)
+
+            if approval_only:
+                query = query.filter(
+                    ScheduledActionRecord.state == "pending_approval"
+                )
+
+            records = query.all()
+
+            if approval_only:
+                records = [
+                    record for record in records
+                    if self._normalize_state(record.state)
+                    == "pending_approval"
+                ]
+
+            if not records:
+                return generated_at, []
+
+            event_ids = list({
+                record.event_id
+                for record in records
+                if record.event_id is not None
+            })
+            incidents = (
+                self._query_by_event_ids(
+                    session,
+                    IncidentRecord,
+                    event_ids,
+                )
+                if event_ids else []
+            )
+            incidents_by_event_id = {
+                incident.event_id: incident for incident in incidents
+            }
+            entries = []
+
+            for record in records:
+                if record.id is None or record.event_id is None:
+                    logger.warning(
+                        "Scheduled action missing dashboard identifiers"
+                    )
+                    continue
+
+                try:
+                    display_status = resolve_operation_status(
+                        state=record.state,
+                        processing_started_at=record.processing_started_at,
+                        now=generated_at,
+                        processing_timeout_minutes=(
+                            self.processing_timeout_minutes
+                        ),
+                    )
+                except ValueError:
+                    logger.warning(
+                        "Unsupported scheduled action state: id=%s",
+                        record.id,
+                    )
+                    continue
+
+                incident = incidents_by_event_id.get(record.event_id)
+                activity_at = self._operation_activity_at(record)
+
+                for action_index, action in enumerate(
+                    self._operation_actions(record.actions)
+                ):
+                    item = DashboardOperationItem(
+                        scheduled_action_id=record.id,
+                        event_id=record.event_id,
+                        client=self._first_value(
+                            record.client,
+                            incident.client if incident else None,
+                        ),
+                        host=self._first_value(
+                            record.host,
+                            incident.host if incident else None,
+                        ),
+                        trigger=self._first_value(
+                            record.trigger,
+                            incident.trigger if incident else None,
+                        ),
+                        severity=self._first_value(
+                            record.severity,
+                            incident.severity if incident else None,
+                        ),
+                        incident_status=(
+                            incident.current_status if incident else None
+                        ),
+                        action=action,
+                        target=record.target,
+                        internal_state=record.state,
+                        display_status=display_status,
+                        scheduled_at=self._as_utc_or_none(
+                            record.scheduled_at
+                        ),
+                        processing_started_at=self._as_utc_or_none(
+                            record.processing_started_at
+                        ),
+                        paused_at=self._as_utc_or_none(record.paused_at),
+                        resumed_at=self._as_utc_or_none(record.resumed_at),
+                        attempt_count=record.attempt_count,
+                        created_at=self._as_utc_or_none(record.created_at),
+                        pause_reason=record.pause_reason,
+                        cancel_reason=record.cancel_reason,
+                        error_message=self._safe_error(
+                            record.error_message or record.last_error
+                        ),
+                    )
+                    entries.append((
+                        self._timestamp(activity_at),
+                        record.id or 0,
+                        -action_index,
+                        item,
+                    ))
+
+            entries.sort(
+                key=lambda entry: entry[:3],
+                reverse=True,
+            )
+
+            return generated_at, [entry[3] for entry in entries]
+
+        except SQLAlchemyError as e:
+            if session is not None:
+                session.rollback()
+            logger.error(
+                "Dashboard operation query failed: %s",
+                type(e).__name__,
+            )
+            raise DashboardQueryError("dashboard_query_failed") from e
+
+        finally:
+            if session is not None:
+                session.close()
 
     def _load_items(self, limit, include_total):
         session = None
@@ -487,6 +691,49 @@ class DashboardQueryService:
             return record.executed_at or record.created_at
 
         return record.created_at
+
+    def _operation_activity_at(self, record):
+        state = self._normalize_state(record.state)
+
+        if state == "processing":
+            return (
+                record.processing_started_at
+                or record.resumed_at
+                or record.created_at
+            )
+
+        if state == "paused":
+            return record.paused_at or record.created_at
+
+        if state == "executed":
+            return (
+                record.executed_at
+                or record.processing_started_at
+                or record.created_at
+            )
+
+        if state == "cancelled":
+            return record.cancelled_at or record.created_at
+
+        if state == "failed":
+            return record.processing_started_at or record.created_at
+
+        return record.scheduled_at or record.created_at
+
+    def _operation_actions(self, value):
+        if isinstance(value, str):
+            action = value.strip()
+            return [action] if action else [None]
+
+        if isinstance(value, (list, tuple)):
+            actions = [
+                action.strip()
+                for action in value
+                if isinstance(action, str) and action.strip()
+            ]
+            return actions or [None]
+
+        return [None]
 
     def _earliest_processing_start(self, records):
         timestamps = [

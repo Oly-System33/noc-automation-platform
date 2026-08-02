@@ -4,7 +4,10 @@ from typing import Annotated, Callable
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas.dashboard import (
+    DashboardApprovalListResponse,
     DashboardIncidentListResponse,
+    DashboardOperationListResponse,
+    DashboardOperationStatus,
     DashboardStatus,
     DashboardSummaryResponse,
 )
@@ -24,6 +27,14 @@ incidents_router = APIRouter(
     prefix="/api/incidents",
     tags=["incidents"],
 )
+operations_router = APIRouter(
+    prefix="/api/operations",
+    tags=["operations"],
+)
+approvals_router = APIRouter(
+    prefix="/api/approvals",
+    tags=["approvals"],
+)
 
 ERROR_RESPONSES = {
     503: {"description": "Dashboard data is temporarily unavailable"},
@@ -31,7 +42,10 @@ ERROR_RESPONSES = {
 }
 
 
-def _execute_query(operation: Callable):
+def _execute_query(
+    operation: Callable,
+    unexpected_detail="Internal server error",
+):
     try:
         return operation()
     except DashboardQueryError:
@@ -47,7 +61,7 @@ def _execute_query(operation: Callable):
         )
         raise HTTPException(
             status_code=500,
-            detail="Internal server error",
+            detail=unexpected_detail,
         ) from None
 
 
@@ -98,4 +112,79 @@ def list_dashboard_incidents(
             client=client,
             status=status,
         )
+    )
+
+
+@operations_router.get(
+    "",
+    response_model=DashboardOperationListResponse,
+    summary="List dashboard operations",
+    description=(
+        "Return individual scheduled actions ordered from most recent to "
+        "oldest."
+    ),
+    responses=ERROR_RESPONSES,
+)
+def list_dashboard_operations(
+    limit: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=500,
+            description="Maximum number of operations to return.",
+        ),
+    ] = 100,
+    client: Annotated[
+        str | None,
+        Query(
+            description="Exact client name, matched case-insensitively.",
+        ),
+    ] = None,
+    status: Annotated[
+        DashboardOperationStatus | None,
+        Query(description="Visible operation status."),
+    ] = None,
+):
+    return _execute_query(
+        lambda: dashboard_query_service.list_operations(
+            limit=limit,
+            client=client,
+            status=status,
+        ),
+        unexpected_detail="Unable to retrieve dashboard data",
+    )
+
+
+@approvals_router.get(
+    "",
+    response_model=DashboardApprovalListResponse,
+    summary="List pending approvals",
+    description=(
+        "Return individual scheduled actions whose internal state is "
+        "pending_approval."
+    ),
+    responses=ERROR_RESPONSES,
+)
+def list_dashboard_approvals(
+    limit: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=500,
+            description="Maximum number of approvals to return.",
+        ),
+    ] = 100,
+    client: Annotated[
+        str | None,
+        Query(
+            description="Exact client name, matched case-insensitively.",
+        ),
+    ] = None,
+):
+    return _execute_query(
+        lambda: dashboard_query_service.list_approvals(
+            limit=limit,
+            client=client,
+        ),
+        unexpected_detail="Unable to retrieve dashboard data",
     )

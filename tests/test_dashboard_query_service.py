@@ -12,7 +12,7 @@ from app.db.models import (
     ProcessedEventRecord,
     ScheduledActionRecord,
 )
-from app.schemas.dashboard import DashboardStatus
+from app.schemas.dashboard import DashboardOperationStatus, DashboardStatus
 from app.services.dashboard_query_service import (
     DashboardQueryError,
     DashboardQueryService,
@@ -165,9 +165,17 @@ def make_scheduled(
     activity_at=NOW,
     actions=None,
     error=None,
+    client="Banco X",
+    host="host-1",
+    trigger="trigger-1",
+    severity="High",
 ):
     record = ScheduledActionRecord(
         event_id=event_id,
+        client=client,
+        host=host,
+        trigger=trigger,
+        severity=severity,
         state=state,
         actions=actions if actions is not None else ["telegram"],
         target="noc",
@@ -724,6 +732,203 @@ class DashboardQueryServiceTest(unittest.TestCase):
         self.assertEqual(summary.by_client, {"Banco X": 2, "unknown": 1})
         self.assertEqual(sum(summary.counts.model_dump().values()), 3)
         self.assertEqual(session.execution_count, 6)
+
+    def test_operations_expand_actions_and_map_available_data(self):
+        scheduled = make_scheduled(
+            "paused",
+            record_id=42,
+            actions=["jira", "telegram"],
+            client=None,
+            host=None,
+            trigger=None,
+            severity=None,
+            error="token=secret database unavailable",
+        )
+        scheduled.pause_reason = "manual_pause"
+        scheduled.contacts_payload = {
+            "phone": "5491112345678",
+            "email": "secret@example.com",
+        }
+        incident = make_incident(
+            client="Banco X",
+            state="open",
+        )
+        service, session = self.build_service({
+            ScheduledActionRecord: [scheduled],
+            IncidentRecord: [incident],
+        })
+
+        response = service.list_operations()
+
+        self.assertEqual(response.total, 2)
+        self.assertEqual(
+            [item.action for item in response.items],
+            ["jira", "telegram"],
+        )
+        item = response.items[0]
+        self.assertEqual(item.scheduled_action_id, 42)
+        self.assertEqual(item.client, "Banco X")
+        self.assertEqual(item.host, "host-1")
+        self.assertEqual(item.incident_status, "open")
+        self.assertEqual(item.display_status, DashboardOperationStatus.PAUSED)
+        self.assertEqual(item.pause_reason, "manual_pause")
+        payload = item.model_dump_json()
+        self.assertNotIn("5491112345678", payload)
+        self.assertNotIn("secret@example.com", payload)
+        self.assertNotIn("token=secret", payload)
+        self.assertEqual(session.execution_count, 2)
+
+    def test_operation_statuses_include_stuck_resumed_and_executed(self):
+        stale = make_scheduled(
+            "processing",
+            event_id="stale",
+            record_id=1,
+            activity_at=NOW - timedelta(minutes=11),
+        )
+        resumed = make_scheduled(
+            "processing",
+            event_id="resumed",
+            record_id=2,
+            activity_at=NOW - timedelta(minutes=1),
+        )
+        executed = make_scheduled(
+            "executed",
+            event_id="executed",
+            record_id=3,
+            activity_at=NOW,
+        )
+        service, _ = self.build_service({
+            ScheduledActionRecord: [stale, resumed, executed],
+        })
+
+        response = service.list_operations()
+        status_by_event = {
+            item.event_id: item.display_status for item in response.items
+        }
+
+        self.assertEqual(
+            status_by_event["stale"],
+            DashboardOperationStatus.STUCK,
+        )
+        self.assertEqual(
+            status_by_event["resumed"],
+            DashboardOperationStatus.EXECUTING,
+        )
+        self.assertEqual(
+            status_by_event["executed"],
+            DashboardOperationStatus.EXECUTED,
+        )
+
+    def test_operations_filter_order_total_and_limit(self):
+        older = make_scheduled(
+            "paused",
+            event_id="older",
+            record_id=1,
+            activity_at=NOW - timedelta(minutes=2),
+            client="Banco X",
+        )
+        newer = make_scheduled(
+            "paused",
+            event_id="newer",
+            record_id=2,
+            activity_at=NOW - timedelta(minutes=1),
+            client="banco x",
+        )
+        other = make_scheduled(
+            "failed",
+            event_id="other",
+            record_id=3,
+            activity_at=NOW,
+            client="Banco Y",
+        )
+        service, _ = self.build_service({
+            ScheduledActionRecord: [older, newer, other],
+        })
+
+        response = service.list_operations(
+            limit=1,
+            client=" BANCO X ",
+            status=DashboardOperationStatus.PAUSED,
+        )
+
+        self.assertEqual(response.total, 2)
+        self.assertEqual(len(response.items), 1)
+        self.assertEqual(response.items[0].event_id, "newer")
+
+    def test_operation_query_count_is_constant_and_unknown_state_is_skipped(self):
+        records = [
+            make_scheduled(
+                "pending",
+                event_id=f"event-{index}",
+                record_id=index,
+            )
+            for index in range(1, 101)
+        ]
+        records.append(
+            make_scheduled(
+                "unknown",
+                event_id="unknown",
+                record_id=101,
+            )
+        )
+        service, session = self.build_service({
+            ScheduledActionRecord: records,
+        })
+
+        response = service.list_operations()
+
+        self.assertEqual(response.total, 100)
+        self.assertEqual(session.execution_count, 2)
+
+    def test_approvals_only_include_internal_pending_approval(self):
+        states = [
+            "pending_approval",
+            "manual_required",
+            "waiting_confirmation",
+            "paused",
+            "pending",
+        ]
+        records = [
+            make_scheduled(
+                state,
+                event_id=state,
+                record_id=index,
+                client="Banco X" if index < 3 else "Banco Y",
+                actions=["jira", "telegram"] if index == 1 else None,
+            )
+            for index, state in enumerate(states, start=1)
+        ]
+        service, session = self.build_service({
+            ScheduledActionRecord: records,
+        })
+
+        response = service.list_approvals(limit=1, client="banco x")
+
+        self.assertEqual(response.total, 2)
+        self.assertEqual(len(response.items), 1)
+        self.assertTrue(all(
+            item.internal_state == "pending_approval"
+            for item in response.items
+        ))
+        self.assertEqual(session.execution_count, 2)
+
+    def test_operation_database_errors_raise_controlled_exception(self):
+        for fail_on_execution in (1, 2):
+            with self.subTest(fail_on_execution=fail_on_execution):
+                service, session = self.build_service(
+                    {ScheduledActionRecord: [make_scheduled("pending")]},
+                    fail_on_execution=fail_on_execution,
+                )
+
+                with self.assertRaisesRegex(
+                    DashboardQueryError,
+                    "dashboard_query_failed",
+                ):
+                    service.list_operations()
+
+                self.assertEqual(session.rollback_count, 1)
+                self.assertEqual(session.close_count, 1)
+                self.assertEqual(session.commit_count, 0)
 
     def test_successful_reads_close_without_commit_or_rollback(self):
         _, _, session = self.list_one()

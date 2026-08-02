@@ -19,6 +19,17 @@ class DashboardStatus(str, Enum):
     CLOSED = "closed"
 
 
+class DashboardOperationStatus(str, Enum):
+    SCHEDULED = "scheduled"
+    PENDING_APPROVAL = "pending_approval"
+    PAUSED = "paused"
+    EXECUTING = "executing"
+    STUCK = "stuck"
+    EXECUTED = "executed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 def _normalize_state(value):
     if not isinstance(value, str):
         return None
@@ -127,6 +138,44 @@ def resolve_dashboard_status(
     return DashboardStatus.ACTIVE
 
 
+def resolve_operation_status(
+    *,
+    state: str,
+    processing_started_at: datetime | None = None,
+    now: datetime | None = None,
+    processing_timeout_minutes: int = 10,
+) -> DashboardOperationStatus:
+    state = _normalize_state(state)
+
+    if state == "processing":
+        current_time = _as_utc(now or datetime.now(timezone.utc))
+        cutoff = current_time - timedelta(
+            minutes=processing_timeout_minutes
+        )
+
+        if (
+            processing_started_at is not None
+            and _as_utc(processing_started_at) <= cutoff
+        ):
+            return DashboardOperationStatus.STUCK
+
+        return DashboardOperationStatus.EXECUTING
+
+    status_by_state = {
+        "pending": DashboardOperationStatus.SCHEDULED,
+        "pending_approval": DashboardOperationStatus.PENDING_APPROVAL,
+        "paused": DashboardOperationStatus.PAUSED,
+        "executed": DashboardOperationStatus.EXECUTED,
+        "failed": DashboardOperationStatus.FAILED,
+        "cancelled": DashboardOperationStatus.CANCELLED,
+    }
+
+    try:
+        return status_by_state[state]
+    except KeyError:
+        raise ValueError("unsupported_operation_state") from None
+
+
 class DashboardIncidentItem(BaseModel):
     event_id: str
     client: str | None = None
@@ -147,6 +196,29 @@ class DashboardIncidentItem(BaseModel):
     attempt_count: int | None = None
     call_flow_state: str | None = None
     stuck_since: datetime | None = None
+    error_message: str | None = None
+
+
+class DashboardOperationItem(BaseModel):
+    scheduled_action_id: int
+    event_id: str
+    client: str | None = None
+    host: str | None = None
+    trigger: str | None = None
+    severity: str | None = None
+    incident_status: str | None = None
+    action: str | None = None
+    target: str | None = None
+    internal_state: str
+    display_status: DashboardOperationStatus
+    scheduled_at: datetime | None = None
+    processing_started_at: datetime | None = None
+    paused_at: datetime | None = None
+    resumed_at: datetime | None = None
+    attempt_count: int | None = None
+    created_at: datetime | None = None
+    pause_reason: str | None = None
+    cancel_reason: str | None = None
     error_message: str | None = None
 
 
@@ -174,5 +246,17 @@ class DashboardSummaryResponse(BaseModel):
 
 class DashboardIncidentListResponse(BaseModel):
     items: list[DashboardIncidentItem]
+    total: int
+    generated_at: datetime
+
+
+class DashboardOperationListResponse(BaseModel):
+    items: list[DashboardOperationItem]
+    total: int
+    generated_at: datetime
+
+
+class DashboardApprovalListResponse(BaseModel):
+    items: list[DashboardOperationItem]
     total: int
     generated_at: datetime
