@@ -12,7 +12,12 @@ from app.db.models import (
     ProcessedEventRecord,
     ScheduledActionRecord,
 )
-from app.schemas.dashboard import DashboardStatus, resolve_dashboard_status
+from app.schemas.dashboard import (
+    DashboardOperationStatus,
+    DashboardStatus,
+    resolve_dashboard_status,
+    resolve_operation_status,
+)
 from scripts import seed_dashboard_demo as seed
 
 
@@ -170,6 +175,21 @@ class DashboardDemoRecordTest(unittest.TestCase):
                 DashboardStatus(status),
             )
 
+    def test_records_cover_every_operation_status(self):
+        statuses = {
+            resolve_operation_status(
+                state=record.state,
+                processing_started_at=record.processing_started_at,
+                now=NOW,
+                processing_timeout_minutes=(
+                    seed.PROCESSING_TIMEOUT_MINUTES
+                ),
+            )
+            for record in self.records[ScheduledActionRecord]
+        }
+
+        self.assertEqual(statuses, set(DashboardOperationStatus))
+
     def test_executing_is_recent_and_stuck_exceeds_timeout(self):
         actions = {
             record.event_id: record
@@ -282,7 +302,7 @@ class DashboardDemoPersistenceTest(unittest.TestCase):
         removed = seed.clean_demo_records(session_factory=lambda: session)
 
         self.assertEqual(session.query_order, list(seed.CLEANUP_MODELS))
-        self.assertEqual(sum(removed.values()), 34)
+        self.assertEqual(sum(removed.values()), 36)
         self.assertEqual(session.data[IncidentRecord], [real_incident])
         self.assertTrue(all(
             not record.event_id.startswith(seed.DEMO_EVENT_PREFIX)
