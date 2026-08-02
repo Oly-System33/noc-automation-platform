@@ -1128,23 +1128,169 @@ class PersistenceService:
         finally:
             session.close()
 
-    def claim_pending_approval_action(self, scheduled_action_id):
+    def claim_pending_approval_action(
+        self,
+        scheduled_action_id,
+        *,
+        source="cli",
+        note=None,
+    ):
 
-        def operation(session):
+        session = SessionLocal()
+        approval_note = str(note or "").strip()[:500] or None
+
+        try:
+            record = (
+                session.query(ScheduledActionRecord)
+                .filter(ScheduledActionRecord.id == scheduled_action_id)
+                .with_for_update()
+                .one_or_none()
+            )
+
+            if not record:
+                session.rollback()
+                return {
+                    "success": False,
+                    "scheduled_action_id": scheduled_action_id,
+                    "previous_state": None,
+                    "state": None,
+                    "error": "scheduled_action_not_found",
+                }
+
+            if record.state != "pending_approval":
+                state = record.state
+                session.rollback()
+                return {
+                    "success": False,
+                    "scheduled_action_id": scheduled_action_id,
+                    "previous_state": state,
+                    "state": state,
+                    "error": "invalid_state_transition",
+                }
+
+            incident = (
+                session.query(IncidentRecord)
+                .filter(IncidentRecord.event_id == record.event_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            now = self._now()
+
+            if not incident or incident.current_status != "open":
+                reason = (
+                    "incident_not_found"
+                    if incident is None
+                    else "incident_not_open"
+                )
+                updated = (
+                    session.query(ScheduledActionRecord)
+                    .filter(ScheduledActionRecord.id == scheduled_action_id)
+                    .filter(
+                        ScheduledActionRecord.state == "pending_approval"
+                    )
+                    .update({
+                        "state": "cancelled",
+                        "cancelled_at": now,
+                        "cancel_reason": reason,
+                        "processing_started_at": None,
+                    })
+                )
+
+                if updated != 1:
+                    session.rollback()
+                    return {
+                        "success": False,
+                        "scheduled_action_id": scheduled_action_id,
+                        "previous_state": record.state,
+                        "state": record.state,
+                        "error": "invalid_state_transition",
+                    }
+
+                self._add_audit_log(
+                    session,
+                    event_id=record.event_id,
+                    level="WARNING",
+                    component="scheduled_actions",
+                    message="Scheduled action approval rejected",
+                    details={
+                        "scheduled_action_id": scheduled_action_id,
+                        "event_id": record.event_id,
+                        "previous_state": "pending_approval",
+                        "new_state": "cancelled",
+                        "source": source,
+                        "note": approval_note,
+                        "reason": reason,
+                    },
+                )
+                session.commit()
+
+                return {
+                    "success": False,
+                    "scheduled_action_id": scheduled_action_id,
+                    "previous_state": "pending_approval",
+                    "state": "cancelled",
+                    "error": reason,
+                }
+
             updated = (
                 session.query(ScheduledActionRecord)
                 .filter(ScheduledActionRecord.id == scheduled_action_id)
                 .filter(ScheduledActionRecord.state == "pending_approval")
                 .update({
                     "state": "processing",
-                    "processing_started_at": self._now(),
+                    "processing_started_at": now,
                     "attempt_count": ScheduledActionRecord.attempt_count + 1,
                 })
             )
 
-            return updated == 1
+            if updated != 1:
+                session.rollback()
+                return {
+                    "success": False,
+                    "scheduled_action_id": scheduled_action_id,
+                    "previous_state": record.state,
+                    "state": record.state,
+                    "error": "invalid_state_transition",
+                }
 
-        return bool(self._run(operation))
+            self._add_audit_log(
+                session,
+                event_id=record.event_id,
+                level="INFO",
+                component="scheduled_actions",
+                message="Scheduled action approved",
+                details={
+                    "scheduled_action_id": scheduled_action_id,
+                    "event_id": record.event_id,
+                    "previous_state": "pending_approval",
+                    "new_state": "processing",
+                    "source": source,
+                    "note": approval_note,
+                },
+            )
+            session.commit()
+
+            return {
+                "success": True,
+                "scheduled_action_id": scheduled_action_id,
+                "previous_state": "pending_approval",
+                "state": "processing",
+                "error": None,
+            }
+
+        except Exception as e:
+            session.rollback()
+            print(f"[{console.level('ERROR')}] Database operation failed: {e}")
+            return {
+                "success": False,
+                "scheduled_action_id": scheduled_action_id,
+                "previous_state": None,
+                "state": None,
+                "error": "internal_error",
+            }
+
+        finally:
+            session.close()
 
     def get_incident_status(self, event_id):
 

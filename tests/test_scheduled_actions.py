@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from app.api import scheduled_actions
-from app.db.models import ScheduledActionRecord
+from app.db.models import AuditLogRecord, ScheduledActionRecord
 from app.services.persistence_service import PersistenceService
 from app.services.scheduled_action_executor import ScheduledActionExecutor
 from app.services.scheduled_action_worker import ScheduledActionWorker
@@ -292,6 +292,158 @@ class ScheduledActionPersistenceTest(unittest.TestCase):
         ):
             self.assertIn(field, result)
 
+    def test_pending_approval_is_claimed_atomically_with_audit(self):
+        session, query = build_session()
+        record = SimpleNamespace(
+            id=15,
+            event_id="event-1",
+            state="pending_approval",
+        )
+        incident = SimpleNamespace(current_status="open")
+        query.one_or_none.side_effect = [record, incident]
+        query.update.return_value = 1
+
+        with patch(
+            "app.services.persistence_service.SessionLocal",
+            return_value=session,
+        ):
+            with patch.object(self.service, "_now", return_value=NOW):
+                result = self.service.claim_pending_approval_action(
+                    15,
+                    source="dashboard_api",
+                    note=" Approved from dashboard ",
+                )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["previous_state"], "pending_approval")
+        self.assertEqual(result["state"], "processing")
+        changes = query.update.call_args.args[0]
+        self.assertEqual(changes["state"], "processing")
+        self.assertEqual(changes["processing_started_at"], NOW)
+        self.assertIn("pending_approval", expression_values(query))
+        audit = session.add.call_args.args[0]
+        self.assertIsInstance(audit, AuditLogRecord)
+        self.assertEqual(audit.component, "scheduled_actions")
+        self.assertEqual(audit.message, "Scheduled action approved")
+        self.assertEqual(audit.details["source"], "dashboard_api")
+        self.assertEqual(audit.details["note"], "Approved from dashboard")
+        session.commit.assert_called_once()
+
+    def test_incompatible_states_cannot_be_approved(self):
+        incompatible_states = [
+            "pending",
+            "paused",
+            "processing",
+            "executed",
+            "failed",
+            "cancelled",
+        ]
+
+        for state in incompatible_states:
+            with self.subTest(state=state):
+                session, query = build_session()
+                query.one_or_none.return_value = SimpleNamespace(
+                    id=15,
+                    event_id="event-1",
+                    state=state,
+                )
+
+                with patch(
+                    "app.services.persistence_service.SessionLocal",
+                    return_value=session,
+                ):
+                    result = self.service.claim_pending_approval_action(15)
+
+                self.assertFalse(result["success"])
+                self.assertEqual(result["state"], state)
+                self.assertEqual(
+                    result["error"],
+                    "invalid_state_transition",
+                )
+                query.update.assert_not_called()
+                session.add.assert_not_called()
+
+    def test_missing_pending_approval_returns_not_found(self):
+        session, query = build_session()
+        query.one_or_none.return_value = None
+
+        with patch(
+            "app.services.persistence_service.SessionLocal",
+            return_value=session,
+        ):
+            result = self.service.claim_pending_approval_action(999)
+
+        self.assertEqual(result["error"], "scheduled_action_not_found")
+        self.assertIsNone(result["state"])
+        query.update.assert_not_called()
+
+    def test_closed_incident_cancels_approval_and_audits_rejection(self):
+        session, query = build_session()
+        record = SimpleNamespace(
+            id=15,
+            event_id="event-1",
+            state="pending_approval",
+        )
+        incident = SimpleNamespace(current_status="closed")
+        query.one_or_none.side_effect = [record, incident]
+        query.update.return_value = 1
+
+        with patch(
+            "app.services.persistence_service.SessionLocal",
+            return_value=session,
+        ):
+            with patch.object(self.service, "_now", return_value=NOW):
+                result = self.service.claim_pending_approval_action(
+                    15,
+                    source="dashboard_api",
+                    note="closed check",
+                )
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["state"], "cancelled")
+        self.assertEqual(result["error"], "incident_not_open")
+        changes = query.update.call_args.args[0]
+        self.assertEqual(changes["state"], "cancelled")
+        self.assertEqual(changes["cancel_reason"], "incident_not_open")
+        audit = session.add.call_args.args[0]
+        self.assertEqual(
+            audit.message,
+            "Scheduled action approval rejected",
+        )
+        self.assertEqual(audit.details["reason"], "incident_not_open")
+        self.assertEqual(audit.details["source"], "dashboard_api")
+
+    def test_two_approval_claims_only_allow_one_transition(self):
+        first_session, first_query = build_session()
+        first_query.one_or_none.side_effect = [
+            SimpleNamespace(
+                id=15,
+                event_id="event-1",
+                state="pending_approval",
+            ),
+            SimpleNamespace(current_status="open"),
+        ]
+        first_query.update.return_value = 1
+        second_session, second_query = build_session()
+        second_query.one_or_none.return_value = SimpleNamespace(
+            id=15,
+            event_id="event-1",
+            state="processing",
+        )
+
+        with patch(
+            "app.services.persistence_service.SessionLocal",
+            side_effect=[first_session, second_session],
+        ):
+            first = self.service.claim_pending_approval_action(15)
+            second = self.service.claim_pending_approval_action(15)
+
+        self.assertTrue(first["success"])
+        self.assertFalse(second["success"])
+        self.assertEqual(second["error"], "invalid_state_transition")
+        first_query.update.assert_called_once()
+        second_query.update.assert_not_called()
+
 
 class ScheduledActionExecutorTest(unittest.TestCase):
 
@@ -389,6 +541,86 @@ class ScheduledActionWorkerPauseTest(unittest.TestCase):
 
         executor.execute.assert_not_called()
         persistence.claim_scheduled_action.assert_not_called()
+
+
+class ScheduledActionApprovalWorkerTest(unittest.TestCase):
+
+    def test_deferred_approval_reuses_claim_without_executing_inline(self):
+        executor = MagicMock()
+        executor.dispatcher = object()
+        worker = ScheduledActionWorker(executor=executor)
+        approval = {
+            "success": True,
+            "scheduled_action_id": 15,
+            "previous_state": "pending_approval",
+            "state": "processing",
+            "error": None,
+        }
+
+        with patch(
+            "app.services.scheduled_action_worker.persistence_service"
+        ) as persistence:
+            persistence.claim_pending_approval_action.return_value = approval
+            result = worker.approve_scheduled_action(
+                15,
+                source="dashboard_api",
+                note="MVP approval",
+                defer_execution=True,
+            )
+
+        self.assertTrue(result["approved"])
+        self.assertEqual(result["state"], "processing")
+        persistence.claim_pending_approval_action.assert_called_once_with(
+            15,
+            source="dashboard_api",
+            note="MVP approval",
+        )
+        executor.execute.assert_not_called()
+
+    def test_cli_approval_preserves_immediate_execution_and_real_state(self):
+        executor = MagicMock()
+        executor.dispatcher = object()
+        executor.execute.return_value = {"success": True, "results": []}
+        worker = ScheduledActionWorker(executor=executor)
+
+        with patch(
+            "app.services.scheduled_action_worker.persistence_service"
+        ) as persistence:
+            persistence.claim_pending_approval_action.return_value = {
+                "success": True,
+                "scheduled_action_id": 15,
+                "previous_state": "pending_approval",
+                "state": "processing",
+                "error": None,
+            }
+            persistence.get_scheduled_action.return_value = {
+                "id": 15,
+                "state": "executed",
+            }
+            result = worker.approve_scheduled_action(15)
+
+        executor.execute.assert_called_once_with(15)
+        self.assertTrue(result["success"])
+        self.assertEqual(result["state"], "executed")
+
+    def test_rejected_approval_never_executes(self):
+        executor = MagicMock()
+        executor.dispatcher = object()
+        worker = ScheduledActionWorker(executor=executor)
+
+        with patch(
+            "app.services.scheduled_action_worker.persistence_service"
+        ) as persistence:
+            persistence.claim_pending_approval_action.return_value = {
+                "success": False,
+                "scheduled_action_id": 15,
+                "state": "cancelled",
+                "error": "incident_not_open",
+            }
+            result = worker.approve_scheduled_action(15)
+
+        self.assertEqual(result["error"], "incident_not_open")
+        executor.execute.assert_not_called()
 
 
 class FakeBackgroundTasks:
@@ -545,6 +777,179 @@ class ScheduledActionApiTest(unittest.TestCase):
         self.assertEqual(json.loads(response.body)["state"], "cancelled")
         self.assertEqual(background_tasks.calls, [])
 
+    def test_approve_endpoint_accepts_optional_body_and_queues_once(self):
+        result = {
+            "success": True,
+            "scheduled_action_id": 15,
+            "previous_state": "pending_approval",
+            "state": "processing",
+            "approved": True,
+            "execution_started": True,
+            "error": None,
+        }
+
+        for payload, expected_note in (
+            (None, None),
+            (
+                scheduled_actions.ApproveScheduledActionRequest(
+                    note="Approved from dashboard"
+                ),
+                "Approved from dashboard",
+            ),
+        ):
+            with self.subTest(note=expected_note):
+                background_tasks = FakeBackgroundTasks()
+
+                with patch.object(
+                    scheduled_actions.scheduled_action_approval_worker,
+                    "approve_scheduled_action",
+                    return_value=result,
+                ) as approve:
+                    response = scheduled_actions.approve_scheduled_action(
+                        15,
+                        background_tasks,
+                        payload,
+                    )
+
+                body = json.loads(response.body)
+                self.assertEqual(response.status_code, 202)
+                self.assertEqual(body["previous_state"], "pending_approval")
+                self.assertEqual(body["state"], "processing")
+                self.assertTrue(body["approved"])
+                self.assertTrue(body["execution_started"])
+                approve.assert_called_once_with(
+                    15,
+                    source="dashboard_api",
+                    note=expected_note,
+                    defer_execution=True,
+                )
+                self.assertEqual(len(background_tasks.calls), 1)
+                self.assertEqual(background_tasks.calls[0][1], (15,))
+
+    def test_approve_endpoint_maps_not_found_and_conflicts(self):
+        cases = [
+            (
+                {
+                    "success": False,
+                    "scheduled_action_id": 999,
+                    "state": None,
+                    "error": "scheduled_action_not_found",
+                },
+                404,
+            ),
+            (
+                {
+                    "success": False,
+                    "scheduled_action_id": 15,
+                    "state": "paused",
+                    "error": "invalid_state_transition",
+                },
+                409,
+            ),
+            (
+                {
+                    "success": False,
+                    "scheduled_action_id": 15,
+                    "state": "cancelled",
+                    "error": "incident_not_open",
+                },
+                409,
+            ),
+        ]
+
+        for result, expected_status in cases:
+            with self.subTest(error=result["error"]):
+                background_tasks = FakeBackgroundTasks()
+
+                with patch.object(
+                    scheduled_actions.scheduled_action_approval_worker,
+                    "approve_scheduled_action",
+                    return_value=result,
+                ):
+                    response = scheduled_actions.approve_scheduled_action(
+                        result["scheduled_action_id"],
+                        background_tasks,
+                    )
+
+                self.assertEqual(response.status_code, expected_status)
+                self.assertEqual(background_tasks.calls, [])
+
+    def test_second_approval_conflicts_without_second_execution(self):
+        first = {
+            "success": True,
+            "scheduled_action_id": 15,
+            "previous_state": "pending_approval",
+            "state": "processing",
+            "approved": True,
+            "execution_started": True,
+            "error": None,
+        }
+        second = {
+            "success": False,
+            "scheduled_action_id": 15,
+            "previous_state": "processing",
+            "state": "processing",
+            "error": "invalid_state_transition",
+        }
+        background_tasks = FakeBackgroundTasks()
+
+        with patch.object(
+            scheduled_actions.scheduled_action_approval_worker,
+            "approve_scheduled_action",
+            side_effect=[first, second],
+        ) as approve:
+            first_response = scheduled_actions.approve_scheduled_action(
+                15,
+                background_tasks,
+            )
+            second_response = scheduled_actions.approve_scheduled_action(
+                15,
+                background_tasks,
+            )
+
+        self.assertEqual(first_response.status_code, 202)
+        self.assertEqual(second_response.status_code, 409)
+        self.assertEqual(approve.call_count, 2)
+        self.assertEqual(len(background_tasks.calls), 1)
+
+    def test_approve_endpoint_hides_unexpected_error_details(self):
+        background_tasks = FakeBackgroundTasks()
+
+        with patch.object(
+            scheduled_actions.scheduled_action_approval_worker,
+            "approve_scheduled_action",
+            side_effect=RuntimeError("token=secret database exploded"),
+        ) as approve:
+            response = scheduled_actions.approve_scheduled_action(
+                15,
+                background_tasks,
+            )
+
+        body = json.loads(response.body)
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(body["error"], "internal_error")
+        self.assertNotIn("secret", response.body.decode())
+        approve.assert_called_once()
+        self.assertEqual(background_tasks.calls, [])
+
+    def test_approve_endpoint_is_documented_in_openapi(self):
+        from app.main import app
+
+        operation = app.openapi()["paths"][
+            "/api/scheduled-actions/{scheduled_action_id}/approve"
+        ]["post"]
+
+        self.assertEqual(
+            operation["responses"]["202"]["content"][
+                "application/json"
+            ]["schema"]["$ref"],
+            "#/components/schemas/ApproveScheduledActionResponse",
+        )
+        self.assertIn("404", operation["responses"])
+        self.assertIn("409", operation["responses"])
+        self.assertIn("500", operation["responses"])
+        self.assertIn("requestBody", operation)
+
     def test_routes_are_registered(self):
         from app.main import app
 
@@ -556,6 +961,9 @@ class ScheduledActionApiTest(unittest.TestCase):
 
         self.assertIn(("/api/scheduled-actions/{scheduled_action_id}/pause", "POST"), routes)
         self.assertIn(("/api/scheduled-actions/{scheduled_action_id}/resume", "POST"), routes)
+        self.assertIn(("/api/scheduled-actions/{scheduled_action_id}/approve", "POST"), routes)
+        self.assertIn(("/api/approvals", "GET"), routes)
+        self.assertIn(("/api/operations", "GET"), routes)
 
 
 if __name__ == "__main__":

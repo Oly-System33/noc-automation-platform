@@ -159,41 +159,47 @@ class ScheduledActionWorker:
     def _execute_scheduled_action(self, scheduled_action):
         return self.executor.execute_action(scheduled_action)
 
-    def approve_scheduled_action(self, scheduled_action_id):
+    def approve_scheduled_action(
+        self,
+        scheduled_action_id,
+        *,
+        source="cli",
+        note=None,
+        defer_execution=False,
+    ):
 
-        if not persistence_service.claim_pending_approval_action(scheduled_action_id):
+        approval = persistence_service.claim_pending_approval_action(
+            scheduled_action_id,
+            source=source,
+            note=note,
+        )
+
+        if not approval.get("success"):
+            return approval
+
+        if defer_execution:
             return {
-                "success": False,
-                "error": "pending_approval_not_found_or_already_claimed",
+                **approval,
+                "approved": True,
+                "execution_started": True,
             }
 
-        scheduled_action = persistence_service.get_scheduled_action(scheduled_action_id)
+        execution = self.executor.execute(scheduled_action_id)
+        scheduled_action = persistence_service.get_scheduled_action(
+            scheduled_action_id
+        )
 
-        if not scheduled_action:
-            return {"success": False, "error": "scheduled_action_not_found"}
-
-        event_id = scheduled_action.get("event_id")
-        incident_status = persistence_service.get_incident_status(event_id)
-
-        if incident_status is None:
-            self._cancel_scheduled_action(scheduled_action, "incident_not_found")
-            return {"success": False, "error": "incident_not_found"}
-
-        if incident_status != "open":
-            self._cancel_scheduled_action(scheduled_action, "incident_not_open")
-            return {"success": False, "error": "incident_not_open"}
-
-        result = self.executor.execute(scheduled_action_id)
-
-        if result.get("success"):
-            persistence_service.record_audit_log(
-                event_id=event_id,
-                level="INFO",
-                component="scheduled_worker",
-                message="Pending action approved",
-                details={"scheduled_action_id": scheduled_action_id},
-            )
-        return result
+        return {
+            **execution,
+            "scheduled_action_id": scheduled_action_id,
+            "previous_state": "pending_approval",
+            "state": (
+                scheduled_action.get("state")
+                if scheduled_action else "processing"
+            ),
+            "approved": True,
+            "execution_started": True,
+        }
 
     def _build_event(self, scheduled_action):
         return self.executor.build_event(scheduled_action)
