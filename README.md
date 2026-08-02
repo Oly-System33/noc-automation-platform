@@ -144,3 +144,18 @@ curl -X POST http://3.89.189.230:8000/zabbix/webhook \
 ```bash
 .venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+## Dashboard demo data
+
+Create and verify synthetic dashboard records for the `Banco Demo` client:
+
+```bash
+python scripts/seed_dashboard_demo.py
+python scripts/seed_dashboard_demo.py --verify
+python scripts/seed_dashboard_demo.py --clean
+```
+
+The script writes directly through the existing SQLAlchemy session and does
+not trigger webhooks, workers, or external integrations. These records are
+only for dashboard demonstrations and must not be used as production seed
+data.
