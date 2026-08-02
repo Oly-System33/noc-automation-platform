@@ -1,6 +1,8 @@
 import os
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.dashboard import (
     approvals_router,
@@ -20,7 +22,41 @@ from app.services.scheduled_action_worker import (
     stop_background_worker,
 )
 
+
+DEFAULT_CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+
+def parse_cors_allowed_origins(value):
+    if value is None:
+        return list(DEFAULT_CORS_ALLOWED_ORIGINS)
+
+    return [
+        origin.strip()
+        for origin in value.split(",")
+        if origin.strip() and origin.strip() != "*"
+    ]
+
+
+def configure_cors(application, allowed_origins):
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization"],
+    )
+
+
+load_dotenv()
+allowed_origins = parse_cors_allowed_origins(
+    os.getenv("CORS_ALLOWED_ORIGINS")
+)
+
 app = FastAPI()
+configure_cors(app, allowed_origins)
 
 app.include_router(health_router)
 app.include_router(dashboard_router)
