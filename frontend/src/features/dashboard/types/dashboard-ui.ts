@@ -10,35 +10,67 @@ export type KpiTone =
   | 'red'
   | 'slate'
 
-export type KpiItem = {
-  id: string
+export type KpiId =
+  | 'active'
+  | 'scheduled'
+  | 'paused'
+  | 'executing'
+  | 'pending_approval'
+  | 'stuck'
+  | 'failed'
+  | 'closed'
+
+export type KpiDefinition = {
+  id: KpiId
   label: string
-  value: number
   tone: KpiTone
   icon: LucideIcon
   trendPath: string
 }
 
-export type Severity = 'CRÍTICA' | 'ALTA' | 'ADVERTENCIA' | 'MEDIA'
+export type KpiItem = KpiDefinition & {
+  value: number | null
+}
+
+export type Severity =
+  | 'CRÍTICA'
+  | 'ALTA'
+  | 'ADVERTENCIA'
+  | 'MEDIA'
+  | 'INFORMATIVA'
+  | 'SIN CLASIFICAR'
 
 export type VisibleStatus =
   | 'ACTIVO'
-  | 'EJECUTANDO'
   | 'PROGRAMADO'
   | 'PAUSADO'
+  | 'EJECUTANDO'
   | 'PEND-APP'
   | 'TRABADO'
+  | 'FALLIDO'
+  | 'CERRADO'
+  | 'ESPERA-CONF'
+  | 'REINTENTO'
+  | 'MANUAL'
+  | 'CANCELADO'
+  | 'DESCONOCIDO'
+
+export type HealthIndicatorState =
+  | 'operational'
+  | 'warning'
+  | 'unavailable'
 
 export type ActionKind = 'jira' | 'calls' | 'telegram' | 'email' | 'script'
 
 export type Incident = {
   id: string
+  fullId: string
   client: string
   host: string
   trigger: string
   severity: Severity
   status: VisibleStatus
-  action: ActionKind
+  action: string | null
   time: string
 }
 

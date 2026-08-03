@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { DashboardPanel } from '@/features/dashboard/components/dashboard-panel'
-import { approvals } from '@/features/dashboard/data/dashboard-mock-data'
+import { approvals } from '@/features/dashboard/data/dashboard-static-data'
 
 export function ApprovalsTable() {
   return (

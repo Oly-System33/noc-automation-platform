@@ -171,6 +171,12 @@ feature code under `src/features/`; shared API and Query utilities under
 Use React Router for navigation, TanStack Query for server state, shadcn/ui for
 UI primitives, and Vitest with React Testing Library for frontend tests.
 
+Keep API DTOs separate from dashboard-visible models and map between them with
+explicit pure functions. TanStack Query keys must be centralized. API failures
+must use explicit loading and error states and must never silently fall back to
+mock dashboard data. Static sections must remain clearly separated from API
+data until their integration is explicitly requested.
+
 `docs/ui/dashboard-main-reference.png` is the mandatory and definitive visual
 reference. `docs/ui/noc-logo-reference.png` is the mandatory definitive logo.
 Do not change the dashboard distribution without an explicit task, improvise

@@ -1,21 +1,22 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import App from '@/App'
 import { AppProviders } from '@/app/providers'
 import { appRoutes } from '@/app/router'
-import { queryClient } from '@/lib/query-client'
+import { createQueryClient, queryClient } from '@/lib/query-client'
+import { installDashboardFetchMock } from '@/test/dashboard-api-mock'
 
 describe('aplicación', () => {
-  it('renderiza la pantalla inicial sin conectarse al backend', () => {
-    const fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
+  it('renderiza la pantalla inicial dentro de los providers', async () => {
+    const fetchMock = installDashboardFetchMock()
+    const client = createQueryClient()
 
     render(
-      <AppProviders>
+      <AppProviders client={client}>
         <App />
       </AppProviders>,
     )
@@ -23,15 +24,17 @@ describe('aplicación', () => {
     expect(
       screen.getByRole('heading', { name: 'Dashboard principal' }),
     ).toBeInTheDocument()
-    expect(fetchMock).not.toHaveBeenCalled()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
   })
 
   it('navega mediante React Router', async () => {
     const user = userEvent.setup()
     const router = createMemoryRouter(appRoutes, { initialEntries: ['/'] })
+    const client = createQueryClient()
+    installDashboardFetchMock()
 
     render(
-      <AppProviders>
+      <AppProviders client={client}>
         <RouterProvider router={router} />
       </AppProviders>,
     )

@@ -1,6 +1,7 @@
 import {
   Diamond,
   Mail,
+  MessageSquare,
   Phone,
   Send,
   SquareTerminal,
@@ -19,19 +20,40 @@ const actionConfig = {
     label: 'script',
     className: 'text-text-secondary',
   },
+  teams: {
+    icon: MessageSquare,
+    label: 'teams',
+    className: 'text-purple',
+  },
 } satisfies Record<
-  ActionKind,
+  ActionKind | 'teams',
   { icon: typeof Diamond; label: string; className: string }
 >
 
-export function ActionChannel({ action }: { action: ActionKind }) {
-  const config = actionConfig[action]
-  const Icon = config.icon
+export function ActionChannel({ action }: { action: string | null }) {
+  if (!action) {
+    return <span className="text-text-muted">—</span>
+  }
+
+  const normalizedAction = action.toLowerCase()
+  const actionKey = Object.keys(actionConfig).find((key) =>
+    normalizedAction.includes(key),
+  ) as keyof typeof actionConfig | undefined
+  const config = actionKey ? actionConfig[actionKey] : undefined
+  const Icon = config?.icon
 
   return (
-    <span className="inline-flex items-center gap-2 whitespace-nowrap">
-      <Icon aria-hidden="true" className={cn('size-4', config.className)} />
-      <span>{config.label}</span>
+    <span
+      className="inline-flex max-w-full items-center gap-2 whitespace-nowrap"
+      title={action}
+    >
+      {Icon && (
+        <Icon
+          aria-hidden="true"
+          className={cn('size-4 shrink-0', config?.className)}
+        />
+      )}
+      <span className="truncate">{action}</span>
     </span>
   )
 }

@@ -10,6 +10,9 @@ type DashboardPanelProps = {
   children: ReactNode
   footer?: string
   className?: string
+  isRefreshing?: boolean
+  hasError?: boolean
+  onRetry?: () => void
 }
 
 export function DashboardPanel({
@@ -18,6 +21,9 @@ export function DashboardPanel({
   children,
   footer,
   className,
+  isRefreshing = false,
+  hasError = false,
+  onRetry,
 }: DashboardPanelProps) {
   return (
     <Card
@@ -26,7 +32,13 @@ export function DashboardPanel({
         className,
       )}
     >
-      <PanelHeader title={title} count={count} />
+      <PanelHeader
+        title={title}
+        count={count}
+        isRefreshing={isRefreshing}
+        hasError={hasError}
+        onRetry={onRetry}
+      />
       {children}
       {footer && (
         <button

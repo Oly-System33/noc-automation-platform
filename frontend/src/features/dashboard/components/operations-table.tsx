@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { ActionChannel } from '@/features/dashboard/components/action-channel'
 import { DashboardPanel } from '@/features/dashboard/components/dashboard-panel'
 import { StatusBadge } from '@/features/dashboard/components/status-badge'
-import { operations } from '@/features/dashboard/data/dashboard-mock-data'
+import { operations } from '@/features/dashboard/data/dashboard-static-data'
 
 export function OperationsTable() {
   return (

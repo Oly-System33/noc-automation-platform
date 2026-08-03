@@ -50,3 +50,20 @@ El Dashboard principal fue implementado en F2 a partir de la referencia visual
 aprobada. Utiliza datos estáticos tipados y todavía no consume FastAPI. Los
 controles de aprobación, pausa, reanudación y reintento son exclusivamente
 visuales y no ejecutan operaciones reales.
+
+## Integración F3
+
+El Dashboard principal consume mediante TanStack Query:
+
+- `GET /health` para los indicadores de FastAPI y PostgreSQL.
+- `GET /api/dashboard/summary` para las ocho tarjetas KPI.
+- `GET /api/incidents?limit=6` para incidentes recientes.
+
+Las consultas se actualizan automáticamente según `VITE_POLL_INTERVAL_MS` y
+pueden refrescarse en conjunto desde el control superior. Durante un refresco se
+conservan los últimos datos válidos. La interfaz incluye estados compactos de
+carga, lista vacía y error, sin reemplazar datos fallidos por valores mock.
+
+Operaciones, aprobaciones e intervención manual continúan usando datos estáticos
+de F2. Sus botones siguen siendo exclusivamente visuales. Las líneas de tendencia
+de los KPI también continúan siendo decorativas y no representan series reales.

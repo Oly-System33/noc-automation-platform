@@ -14,7 +14,12 @@ const toneVariables: Record<KpiTone, string> = {
   slate: 'var(--text-secondary)',
 }
 
-export function KpiCard({ item }: { item: KpiItem }) {
+type KpiCardProps = {
+  item: KpiItem
+  isLoading?: boolean
+}
+
+export function KpiCard({ item, isLoading = false }: KpiCardProps) {
   const Icon = item.icon
   const style = {
     '--kpi-accent': toneVariables[item.tone],
@@ -24,6 +29,7 @@ export function KpiCard({ item }: { item: KpiItem }) {
     <Card
       data-testid="kpi-card"
       data-size="uniform"
+      aria-label={`${item.label}: ${item.value ?? 'sin datos'}`}
       style={style}
       className="h-[78px] min-w-0 gap-0 rounded-md border border-border bg-surface px-3 py-2.5 ring-0"
     >
@@ -31,7 +37,14 @@ export function KpiCard({ item }: { item: KpiItem }) {
         <Icon aria-hidden="true" className="mt-0.5 size-[19px] shrink-0" />
         <div className="min-w-0 text-center">
           <div className="text-[20px] leading-5 font-medium text-text-primary">
-            {item.value}
+            {isLoading ? (
+              <span
+                aria-label={`Cargando ${item.label}`}
+                className="inline-block h-4 w-6 animate-pulse rounded-sm bg-text-muted/30"
+              />
+            ) : (
+              (item.value ?? '—')
+            )}
           </div>
           <div className="mt-1 truncate text-[10px] leading-none text-text-secondary">
             {item.label}

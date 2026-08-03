@@ -3,10 +3,19 @@ import { NavLink } from 'react-router-dom'
 
 import nocLogo from '@/assets/noc-logo.png'
 import { SystemStatus } from '@/features/dashboard/components/system-status'
-import { navigationItems } from '@/features/dashboard/data/dashboard-mock-data'
+import { navigationItems } from '@/features/dashboard/data/dashboard-visual-data'
+import type { HealthIndicatorState } from '@/features/dashboard/types/dashboard-ui'
 import { cn } from '@/lib/utils'
 
-export function DashboardSidebar() {
+type DashboardSidebarProps = {
+  apiState: HealthIndicatorState
+  databaseState: HealthIndicatorState
+}
+
+export function DashboardSidebar({
+  apiState,
+  databaseState,
+}: DashboardSidebarProps) {
   return (
     <aside className="sticky top-0 flex h-svh w-[220px] shrink-0 flex-col border-r border-border bg-sidebar px-2 py-3">
       <div className="flex h-10 items-center gap-2 px-2">
@@ -49,7 +58,7 @@ export function DashboardSidebar() {
       </nav>
 
       <div className="mt-auto">
-        <SystemStatus />
+        <SystemStatus apiState={apiState} databaseState={databaseState} />
       </div>
 
       <section className="mt-[clamp(40px,13vh,120px)] overflow-hidden rounded-md border border-border bg-surface/70 text-[10px]">

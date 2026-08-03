@@ -3,7 +3,7 @@ import { BookOpen, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DashboardPanel } from '@/features/dashboard/components/dashboard-panel'
 import { SeverityBadge } from '@/features/dashboard/components/severity-badge'
-import { manualInterventions } from '@/features/dashboard/data/dashboard-mock-data'
+import { manualInterventions } from '@/features/dashboard/data/dashboard-static-data'
 
 export function ManualInterventionTable() {
   return (
