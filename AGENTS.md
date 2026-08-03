@@ -140,4 +140,39 @@ Zabbix event must remain testable through `POST /zabbix/webhook`.
 Frontend dashboard MVP
 ```
 
-No frontend stack has been selected yet.
+The selected frontend stack and its operating rules are documented below.
+
+## Frontend dashboard
+
+The independent dashboard frontend lives in `frontend/` and uses React,
+TypeScript, Vite, Tailwind CSS, shadcn/ui, React Router, TanStack Query, Lucide,
+Vitest, and React Testing Library. npm is the only package manager for this
+application.
+
+Main commands, run from `frontend/`, are:
+
+```text
+npm install
+npm run dev
+npm run lint
+npm run test:run
+npm run build
+```
+
+The local frontend URL is `http://localhost:5173`; the local FastAPI URL is
+`http://localhost:8000`. The frontend must access FastAPI only through its API,
+must never access PostgreSQL directly, and must not duplicate backend business,
+worker, persistence, or execution logic.
+
+Application providers and routing live under `src/app/`; reusable components
+under `src/components/`; environment configuration under `src/config/`;
+feature code under `src/features/`; shared API and Query utilities under
+`src/lib/`; route screens under `src/pages/`; and test setup under `src/test/`.
+Use React Router for navigation, TanStack Query for server state, shadcn/ui for
+UI primitives, and Vitest with React Testing Library for frontend tests.
+
+`docs/ui/dashboard-main-reference.png` is the mandatory and definitive visual
+reference. `docs/ui/noc-logo-reference.png` is the mandatory definitive logo.
+Do not change the dashboard distribution without an explicit task, improvise
+color palettes, create a light mode, or add dependencies without a concrete
+need. Keep internal workflow states separate from dashboard-visible labels.
