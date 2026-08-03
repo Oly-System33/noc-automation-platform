@@ -22,7 +22,7 @@ export function ManualInterventionTable(props: ManualInterventionTableProps) {
   const showEmpty = props.hasResponse && props.interventions.length === 0
 
   return <DashboardPanel title="Requiere intervención manual" count={props.hasResponse ? props.interventions.length : undefined} footer="Ver todas las intervenciones" isRefreshing={props.isFetching && !props.isLoading} hasError={props.isError && props.hasResponse} onRetry={props.onRetryList}>
-    <div className="noc-scrollbar overflow-x-auto"><table aria-label="Requiere intervención manual" className="w-full min-w-[850px] table-fixed text-left text-[10px]">
+    <div className="noc-scrollbar min-h-0 flex-1 overflow-auto"><table aria-label="Requiere intervención manual" className="w-full min-w-[850px] table-fixed text-left text-[10px]">
       <thead className="text-text-muted"><tr className="h-6 border-b border-border-subtle"><th scope="col" className="w-[11%] px-3 font-normal">ID</th><th scope="col" className="w-[12%] px-2 font-normal">Cliente</th><th scope="col" className="w-[28%] px-2 font-normal">Descripción</th><th scope="col" className="w-[12%] px-2 text-center font-normal">Severidad</th><th scope="col" className="w-[10%] px-2 font-normal">Tiempo</th><th scope="col" className="w-[27%] px-2 font-normal">Acciones sugeridas</th></tr></thead>
       <tbody className="text-text-secondary">
         {props.isLoading && Array.from({ length: 3 }, (_, index) => <tr key={index} data-testid="intervention-skeleton" className="h-[27px] border-b border-border-subtle"><td colSpan={6} className="px-3"><span className="block h-2.5 animate-pulse rounded-sm bg-text-muted/15" /></td></tr>)}

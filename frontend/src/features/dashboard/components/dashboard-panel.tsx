@@ -28,7 +28,7 @@ export function DashboardPanel({
   return (
     <Card
       className={cn(
-        'gap-0 overflow-hidden rounded-md border border-border bg-surface py-0 ring-0',
+        'h-full min-h-0 gap-0 overflow-hidden rounded-md border border-border bg-surface py-0 ring-0',
         className,
       )}
     >
@@ -43,7 +43,7 @@ export function DashboardPanel({
       {footer && (
         <button
           type="button"
-          className="mt-auto flex h-7 w-full items-center justify-between border-t border-border-subtle px-3 text-left text-[10px] text-text-muted transition-colors hover:bg-surface-hover hover:text-text-secondary"
+          className="mt-auto flex h-7 w-full shrink-0 items-center justify-between border-t border-border-subtle px-3 text-left text-[10px] text-text-muted transition-colors hover:bg-surface-hover hover:text-text-secondary"
         >
           {footer}
           <span aria-hidden="true" className="text-base leading-none">

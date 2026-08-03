@@ -51,7 +51,7 @@ export function IncidentsTable({
       hasError={isError && hasResponse}
       onRetry={onRetry}
     >
-      <div className="noc-scrollbar overflow-x-auto">
+      <div className="noc-scrollbar min-h-0 flex-1 overflow-auto">
         <table
           aria-label="Incidentes recientes"
           className="w-full min-w-[900px] table-fixed text-left text-[10px]"

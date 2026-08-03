@@ -30,6 +30,69 @@ function renderDashboard(options?: FetchOptions) {
 }
 
 describe('Dashboard principal integrado', () => {
+  it('organiza los cuatro paneles en la cuadrícula responsive definitiva', () => {
+    renderDashboard()
+
+    const grid = screen.getByTestId('dashboard-content-grid')
+    const panelHeadings = within(grid).getAllByRole('heading', { level: 2 })
+
+    expect(grid).toHaveClass(
+      'dashboard-content-grid',
+      'grid',
+      'min-h-0',
+      'flex-1',
+      'grid-cols-1',
+      'min-[1100px]:grid-cols-2',
+      'min-[1100px]:grid-rows-[minmax(320px,1.38fr)_minmax(220px,1fr)]',
+    )
+    expect(panelHeadings.map((heading) => heading.textContent)).toEqual([
+      'Incidentes recientes',
+      'Operaciones activas',
+      'Requiere intervención manual',
+      'Aprobaciones pendientes',
+    ])
+
+    for (const heading of panelHeadings) {
+      expect(heading.closest('[data-slot="card"]')).toHaveClass(
+        'h-full',
+        'min-h-0',
+      )
+    }
+
+    for (const table of within(grid).getAllByRole('table')) {
+      expect(table.parentElement).toHaveClass(
+        'min-h-0',
+        'flex-1',
+        'overflow-auto',
+      )
+    }
+  })
+
+  it('conserva el orden y las consultas al simular un ancho reducido', async () => {
+    const originalWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 960,
+    })
+
+    try {
+      const { fetchMock } = renderDashboard()
+      const grid = screen.getByTestId('dashboard-content-grid')
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
+      window.dispatchEvent(new Event('resize'))
+
+      expect(grid).toHaveClass('grid-cols-1', 'min-[1100px]:grid-cols-2')
+      expect(within(grid).getAllByRole('table')).toHaveLength(4)
+      expect(fetchMock).toHaveBeenCalledTimes(6)
+    } finally {
+      Object.defineProperty(window, 'innerWidth', {
+        configurable: true,
+        value: originalWidth,
+      })
+    }
+  })
+
   it('renderiza los ocho KPI recibidos y conserva su estructura uniforme', async () => {
     renderDashboard()
 

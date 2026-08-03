@@ -171,18 +171,21 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="flex h-svh min-w-[1180px] overflow-hidden bg-background">
+    <div className="flex h-svh min-w-0 overflow-hidden bg-background">
       <DashboardSidebar apiState={health.api} databaseState={health.database} />
       <main className="noc-scrollbar min-w-0 flex-1 overflow-y-auto p-2">
-        <div className="flex min-h-full flex-col gap-2">
+        <div className="flex min-h-full flex-col gap-2 min-[1100px]:h-full min-[1100px]:min-h-0">
           <DashboardHeader apiState={health.api} databaseState={health.database} pollingLabel={formatPollingInterval(env.pollIntervalMs)} lastUpdatedLabel={lastUpdatedLabel} isRefreshing={isRefreshing} onRefresh={refreshDashboard} />
           <KpiGrid counts={summaryQuery.data?.counts} isLoading={summaryQuery.isPending} isError={summaryQuery.isError} isRetrying={summaryQuery.isFetching} onRetry={() => void summaryQuery.refetch()} />
-          <IncidentsTable incidents={incidents} hasResponse={incidentsQuery.data !== undefined} isLoading={incidentsQuery.isPending} isError={incidentsQuery.isError} isFetching={incidentsQuery.isFetching} onRetry={() => void incidentsQuery.refetch()} />
-          <div className="grid grid-cols-1 gap-2 min-[1180px]:grid-cols-[0.86fr_1.04fr]">
+          <div
+            data-testid="dashboard-content-grid"
+            className="dashboard-content-grid grid min-h-0 flex-1 grid-cols-1 auto-rows-[minmax(220px,auto)] gap-2 min-[1100px]:grid-cols-2 min-[1100px]:grid-rows-[minmax(320px,1.38fr)_minmax(220px,1fr)] min-[1100px]:auto-rows-auto"
+          >
+            <IncidentsTable incidents={incidents} hasResponse={incidentsQuery.data !== undefined} isLoading={incidentsQuery.isPending} isError={incidentsQuery.isError} isFetching={incidentsQuery.isFetching} onRetry={() => void incidentsQuery.refetch()} />
             <OperationsTable operations={operations} hasResponse={operationsQuery.data !== undefined} isLoading={operationsQuery.isPending} isError={operationsQuery.isError} isFetching={operationsQuery.isFetching} pendingId={pendingOperationId} onRetry={() => void operationsQuery.refetch()} onPause={pauseOperation} onResume={resumeOperation} />
+            <ManualInterventionTable interventions={interventions} hasResponse={interventionsQuery.data !== undefined} isLoading={interventionsQuery.isPending} isError={interventionsQuery.isError} isFetching={interventionsQuery.isFetching} pendingId={retryMutation.isPending ? retryMutation.variables?.interventionId ?? null : null} onRetryList={() => void interventionsQuery.refetch()} onViewRunbook={setSelectedIntervention} onRetryIntervention={retryIntervention} />
             <ApprovalsTable approvals={approvals} hasResponse={approvalsQuery.data !== undefined} isLoading={approvalsQuery.isPending} isError={approvalsQuery.isError} isFetching={approvalsQuery.isFetching} pendingId={pendingApprovalId} onRetry={() => void approvalsQuery.refetch()} onApprove={approveAction} onReject={rejectAction} />
           </div>
-          <ManualInterventionTable interventions={interventions} hasResponse={interventionsQuery.data !== undefined} isLoading={interventionsQuery.isPending} isError={interventionsQuery.isError} isFetching={interventionsQuery.isFetching} pendingId={retryMutation.isPending ? retryMutation.variables?.interventionId ?? null : null} onRetryList={() => void interventionsQuery.refetch()} onViewRunbook={setSelectedIntervention} onRetryIntervention={retryIntervention} />
         </div>
       </main>
       <DashboardNotification notice={notice} onClose={() => setNotice(null)} />

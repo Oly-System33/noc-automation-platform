@@ -20,7 +20,7 @@ export function PanelHeader({
   onRetry,
 }: PanelHeaderProps) {
   return (
-    <header className="flex h-8 items-center justify-between border-b border-border-subtle px-3">
+    <header className="flex h-8 shrink-0 items-center justify-between border-b border-border-subtle px-3">
       <div className="flex items-center gap-2">
         <h2 className="text-[15px] leading-none font-medium text-text-primary">
           {title}

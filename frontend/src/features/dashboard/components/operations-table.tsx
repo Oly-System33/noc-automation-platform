@@ -30,7 +30,7 @@ export function OperationsTable(props: OperationsTableProps) {
       hasError={props.isError && props.hasResponse}
       onRetry={props.onRetry}
     >
-      <div className="noc-scrollbar overflow-x-auto">
+      <div className="noc-scrollbar min-h-0 flex-1 overflow-auto">
         <table aria-label="Operaciones activas" className="w-full min-w-[420px] table-fixed text-left text-[10px]">
           <thead className="text-text-muted"><tr className="h-6 border-b border-border-subtle">
             <th scope="col" className="w-[17%] px-3 font-normal">Acción</th><th scope="col" className="w-[15%] px-2 font-normal">Cliente</th><th scope="col" className="w-[22%] px-2 text-center font-normal">Estado</th><th scope="col" className="w-[20%] px-2 font-normal">Objetivo</th><th scope="col" className="w-[10%] px-2 font-normal">Intentos</th><th scope="col" className="w-[16%] px-2 font-normal">Acciones</th>
