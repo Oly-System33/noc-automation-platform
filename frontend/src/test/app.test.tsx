@@ -20,7 +20,9 @@ describe('aplicación', () => {
       </AppProviders>,
     )
 
-    expect(screen.getByText('Frontend NOC listo')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Dashboard principal' }),
+    ).toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

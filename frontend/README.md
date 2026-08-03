@@ -1,7 +1,6 @@
 # NOC Dashboard Frontend
 
-Base técnica del frontend independiente del Dashboard NOC. El dashboard visual
-completo todavía no se implementó en esta parte.
+Frontend independiente del Dashboard NOC.
 
 ## Instalación
 
@@ -43,5 +42,11 @@ través de `src/config/env.ts`.
 - `docs/ui/dashboard-main-reference.png`
 - `docs/ui/noc-logo-reference.png`
 
-Estas referencias son obligatorias para las siguientes etapas. Esta base no
-intenta reproducir todavía el diseño final del dashboard.
+Estas referencias son obligatorias para las siguientes etapas.
+
+## Dashboard principal estático
+
+El Dashboard principal fue implementado en F2 a partir de la referencia visual
+aprobada. Utiliza datos estáticos tipados y todavía no consume FastAPI. Los
+controles de aprobación, pausa, reanudación y reintento son exclusivamente
+visuales y no ejecutan operaciones reales.
