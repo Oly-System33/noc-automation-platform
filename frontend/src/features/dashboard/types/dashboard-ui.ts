@@ -53,6 +53,7 @@ export type VisibleStatus =
   | 'REINTENTO'
   | 'MANUAL'
   | 'CANCELADO'
+  | 'EJECUTADO'
   | 'DESCONOCIDO'
 
 export type HealthIndicatorState =
@@ -75,15 +76,18 @@ export type Incident = {
 }
 
 export type Operation = {
-  action: ActionKind
+  rowId: string
+  scheduledActionId: number
+  action: string | null
   client: string
   status: VisibleStatus
   target: string
   attempts: string
-  control: 'Pausar' | 'Reanudar'
+  control: 'Pausar' | 'Reanudar' | null
 }
 
 export type Approval = {
+  scheduledActionId: number
   id: string
   client: string
   objective: string
@@ -92,11 +96,17 @@ export type Approval = {
 }
 
 export type ManualIntervention = {
-  id: string
+  interventionId: string
+  eventId: string
   client: string
+  host: string
   description: string
   severity: Severity
+  status: VisibleStatus
   time: string
+  failureReason: string
+  retrySupported: boolean
+  runbookAvailable: boolean
 }
 
 export type NavigationItem = {

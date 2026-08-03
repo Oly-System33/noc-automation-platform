@@ -13,6 +13,7 @@ const statusLabels: Record<string, VisibleStatus> = {
   retry_scheduled: 'REINTENTO',
   manual_required: 'MANUAL',
   cancelled: 'CANCELADO',
+  executed: 'EJECUTADO',
 }
 
 export function mapDashboardStatusToLabel(

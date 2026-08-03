@@ -32,6 +32,13 @@ MAX_ERROR_LENGTH = 500
 
 logger = logging.getLogger(__name__)
 
+ACTIVE_OPERATION_STATUSES = {
+    DashboardOperationStatus.SCHEDULED,
+    DashboardOperationStatus.PAUSED,
+    DashboardOperationStatus.EXECUTING,
+    DashboardOperationStatus.STUCK,
+}
+
 SCHEDULED_ACTION_PRIORITY = {
     "failed": 1,
     "pending_approval": 2,
@@ -135,6 +142,7 @@ class DashboardQueryService:
         limit: int = 100,
         client: str | None = None,
         status: DashboardOperationStatus | None = None,
+        active_only: bool = False,
     ) -> DashboardOperationListResponse:
         limit = max(1, min(int(limit), MAX_DASHBOARD_LIMIT))
         client_filter = str(client).strip().casefold() if client else None
@@ -155,6 +163,12 @@ class DashboardQueryService:
             items = [
                 item for item in items
                 if item.display_status == status_filter
+            ]
+
+        if active_only:
+            items = [
+                item for item in items
+                if item.display_status in ACTIVE_OPERATION_STATUSES
             ]
 
         return DashboardOperationListResponse(
@@ -256,9 +270,13 @@ class DashboardQueryService:
                 incident = incidents_by_event_id.get(record.event_id)
                 activity_at = self._operation_activity_at(record)
 
-                for action_index, action in enumerate(
-                    self._operation_actions(record.actions)
-                ):
+                actions = self._operation_actions(record.actions)
+                if approval_only:
+                    actions = [", ".join(
+                        action for action in actions if action
+                    ) or None]
+
+                for action_index, action in enumerate(actions):
                     item = DashboardOperationItem(
                         scheduled_action_id=record.id,
                         event_id=record.event_id,

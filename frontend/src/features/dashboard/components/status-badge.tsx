@@ -14,6 +14,7 @@ const statusClasses: Record<VisibleStatus, string> = {
   REINTENTO: 'border-orange/80 bg-orange/10 text-orange',
   MANUAL: 'border-purple/80 bg-purple/10 text-primary-hover',
   CANCELADO: 'border-text-muted/70 bg-text-muted/10 text-text-muted',
+  EJECUTADO: 'border-green/70 bg-green/10 text-green',
   DESCONOCIDO: 'border-text-muted/70 bg-text-muted/10 text-text-muted',
 }
 

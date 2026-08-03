@@ -1,3 +1,4 @@
+import re
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -57,6 +58,41 @@ class PersistenceService:
             return [self._safe_value(item) for item in value]
 
         return str(value)
+
+    def _safe_audit_text(self, value, max_length):
+
+        if value is None:
+            return None
+
+        value = " ".join(str(value).split())
+        value = re.sub(
+            r"([a-z][a-z0-9+.-]*://)[^/@\s]+@",
+            r"\1***@",
+            value,
+            flags=re.IGNORECASE,
+        )
+        value = re.sub(
+            r"\bAuthorization\s*[:=]\s*(?:Basic|Bearer)?\s*[^,;]+",
+            "Authorization: ***",
+            value,
+            flags=re.IGNORECASE,
+        )
+        value = re.sub(
+            r'''(["']?(?:token|access[_-]?token|refresh[_-]?token|password|'''
+            r'''secret|client[_-]?secret|api[_-]?key)["']?\s*[:=]\s*)'''
+            r'''(["']?)[^"',;\s}]+\2''',
+            r"\1\2***\2",
+            value,
+            flags=re.IGNORECASE,
+        )
+        value = re.sub(
+            r"\bBearer\s+[^,;\s]+",
+            "Bearer ***",
+            value,
+            flags=re.IGNORECASE,
+        )
+
+        return value[:max_length] or None
 
     def _parse_datetime(self, value):
 
@@ -1275,6 +1311,89 @@ class PersistenceService:
                 "scheduled_action_id": scheduled_action_id,
                 "previous_state": "pending_approval",
                 "state": "processing",
+                "error": None,
+            }
+
+        except Exception as e:
+            session.rollback()
+            print(f"[{console.level('ERROR')}] Database operation failed: {e}")
+            return {
+                "success": False,
+                "scheduled_action_id": scheduled_action_id,
+                "previous_state": None,
+                "state": None,
+                "error": "internal_error",
+            }
+
+        finally:
+            session.close()
+
+    def reject_pending_approval_action(
+        self,
+        scheduled_action_id,
+        *,
+        source="cli",
+        note=None,
+    ):
+
+        session = SessionLocal()
+        rejection_source = (
+            self._safe_audit_text(source, 100) or "unknown"
+        )
+        rejection_note = self._safe_audit_text(note, 500)
+
+        try:
+            with session.begin():
+                record = (
+                    session.query(ScheduledActionRecord)
+                    .filter(ScheduledActionRecord.id == scheduled_action_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+
+                if not record:
+                    return {
+                        "success": False,
+                        "scheduled_action_id": scheduled_action_id,
+                        "previous_state": None,
+                        "state": None,
+                        "error": "scheduled_action_not_found",
+                    }
+
+                if record.state != "pending_approval":
+                    return {
+                        "success": False,
+                        "scheduled_action_id": scheduled_action_id,
+                        "previous_state": record.state,
+                        "state": record.state,
+                        "error": "invalid_state_transition",
+                    }
+
+                now = self._now()
+                record.state = "cancelled"
+                record.cancelled_at = now
+                record.cancel_reason = "operator_rejected"
+                record.processing_started_at = None
+                self._add_audit_log(
+                    session,
+                    event_id=record.event_id,
+                    level="INFO",
+                    component="scheduled_actions",
+                    message="approval_rejected",
+                    details={
+                        "scheduled_action_id": scheduled_action_id,
+                        "previous_state": "pending_approval",
+                        "new_state": "cancelled",
+                        "source": rejection_source,
+                        "note": rejection_note,
+                    },
+                )
+
+            return {
+                "success": True,
+                "scheduled_action_id": scheduled_action_id,
+                "previous_state": "pending_approval",
+                "state": "cancelled",
                 "error": None,
             }
 

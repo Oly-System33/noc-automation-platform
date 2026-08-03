@@ -855,6 +855,51 @@ class DashboardQueryServiceTest(unittest.TestCase):
         self.assertEqual(len(response.items), 1)
         self.assertEqual(response.items[0].event_id, "newer")
 
+    def test_active_operations_are_filtered_before_limit(self):
+        states = [
+            "executed",
+            "failed",
+            "cancelled",
+            "pending_approval",
+            "pending",
+            "paused",
+            "processing",
+        ]
+        records = [
+            make_scheduled(
+                state,
+                event_id=state,
+                record_id=index,
+                activity_at=NOW - timedelta(minutes=index),
+            )
+            for index, state in enumerate(states, start=1)
+        ]
+        records.append(make_scheduled(
+            "processing",
+            event_id="stuck",
+            record_id=20,
+            activity_at=NOW - timedelta(minutes=20),
+        ))
+        service, _ = self.build_service({ScheduledActionRecord: records})
+
+        response = service.list_operations(limit=2, active_only=True)
+
+        self.assertEqual(response.total, 4)
+        self.assertEqual(len(response.items), 2)
+        self.assertTrue(all(
+            item.display_status in {
+                DashboardOperationStatus.SCHEDULED,
+                DashboardOperationStatus.PAUSED,
+                DashboardOperationStatus.EXECUTING,
+                DashboardOperationStatus.STUCK,
+            }
+            for item in response.items
+        ))
+        self.assertNotIn(
+            "pending_approval",
+            {item.internal_state for item in response.items},
+        )
+
     def test_operation_query_count_is_constant_and_unknown_state_is_skipped(self):
         records = [
             make_scheduled(
@@ -904,8 +949,9 @@ class DashboardQueryServiceTest(unittest.TestCase):
 
         response = service.list_approvals(limit=1, client="banco x")
 
-        self.assertEqual(response.total, 2)
+        self.assertEqual(response.total, 1)
         self.assertEqual(len(response.items), 1)
+        self.assertEqual(response.items[0].action, "jira, telegram")
         self.assertTrue(all(
             item.internal_state == "pending_approval"
             for item in response.items

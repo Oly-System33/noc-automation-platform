@@ -7,20 +7,32 @@ import { env } from '@/config/env'
 import { createQueryClient } from '@/lib/query-client'
 
 import {
+  getDashboardApprovals,
+  getDashboardInterventions,
+  getDashboardOperations,
   getDashboardSummary,
   getHealth,
+  getInterventionRunbook,
   getRecentIncidents,
 } from './dashboard-api'
 import { dashboardQueryKeys } from './dashboard-query-keys'
 import {
+  useDashboardApprovalsQuery,
+  useDashboardInterventionsQuery,
+  useDashboardOperationsQuery,
   useDashboardSummaryQuery,
   useHealthQuery,
+  useInterventionRunbookQuery,
   useRecentIncidentsQuery,
 } from './dashboard-queries'
 
 vi.mock('./dashboard-api', () => ({
+  getDashboardApprovals: vi.fn(),
+  getDashboardInterventions: vi.fn(),
+  getDashboardOperations: vi.fn(),
   getDashboardSummary: vi.fn(),
   getHealth: vi.fn(),
+  getInterventionRunbook: vi.fn(),
   getRecentIncidents: vi.fn(),
 }))
 
@@ -41,6 +53,27 @@ describe('queries del dashboard', () => {
       'dashboard',
       'incidents',
       { limit: 6 },
+    ])
+    expect(dashboardQueryKeys.incidentLists()).toEqual(['dashboard', 'incidents'])
+    expect(dashboardQueryKeys.operations(5, true)).toEqual([
+      'dashboard',
+      'operations',
+      { limit: 5, activeOnly: true },
+    ])
+    expect(dashboardQueryKeys.approvals(3)).toEqual([
+      'dashboard',
+      'approvals',
+      { limit: 3 },
+    ])
+    expect(dashboardQueryKeys.interventions(3)).toEqual([
+      'dashboard',
+      'interventions',
+      { limit: 3 },
+    ])
+    expect(dashboardQueryKeys.runbook('item:1')).toEqual([
+      'dashboard',
+      'runbooks',
+      'item:1',
     ])
     expect(createQueryClient().getDefaultOptions().queries?.retry).toBe(1)
   })
@@ -142,5 +175,81 @@ describe('queries del dashboard', () => {
 
     await waitFor(() => expect(result.current.data).toEqual(recovered))
     expect(result.current.error).toBeNull()
+  })
+
+  it('aplica polling, señales y límites predeterminados a las listas F4', async () => {
+    const response = { items: [], total: 0, generated_at: '2026-08-03T12:00:00Z' }
+    vi.mocked(getDashboardOperations).mockResolvedValue(response)
+    vi.mocked(getDashboardApprovals).mockResolvedValue(response)
+    vi.mocked(getDashboardInterventions).mockResolvedValue([])
+    const contexts = [createWrapper(), createWrapper(), createWrapper()]
+
+    renderHook(() => useDashboardOperationsQuery(), { wrapper: contexts[0].Wrapper })
+    renderHook(() => useDashboardApprovalsQuery(), { wrapper: contexts[1].Wrapper })
+    renderHook(() => useDashboardInterventionsQuery(), { wrapper: contexts[2].Wrapper })
+
+    await waitFor(() => expect(getDashboardInterventions).toHaveBeenCalled())
+    expect(vi.mocked(getDashboardOperations).mock.calls[0][0]).toMatchObject({
+      limit: 5,
+      activeOnly: true,
+      signal: expect.any(AbortSignal),
+    })
+    expect(vi.mocked(getDashboardApprovals).mock.calls[0][0]).toMatchObject({
+      limit: 3,
+      signal: expect.any(AbortSignal),
+    })
+    expect(vi.mocked(getDashboardInterventions).mock.calls[0][0]).toMatchObject({
+      limit: 3,
+      signal: expect.any(AbortSignal),
+    })
+    for (const [context, key] of [
+      [contexts[0], dashboardQueryKeys.operations(5, true)],
+      [contexts[1], dashboardQueryKeys.approvals(3)],
+      [contexts[2], dashboardQueryKeys.interventions(3)],
+    ] as const) {
+      const query = context.client.getQueryCache().find({ queryKey: key })
+      const options = query?.options as
+        | (NonNullable<typeof query>['options'] & { refetchInterval?: number })
+        | undefined
+      expect(options?.refetchInterval).toBe(env.pollIntervalMs)
+    }
+  })
+
+  it('mantiene el runbook deshabilitado y no configura polling', async () => {
+    const runbook = {
+      intervention_id: 'call_flow:2',
+      source: 'current_runbook' as const,
+      warning: null,
+      actions: ['email'],
+      target: null,
+      delay_minutes: null,
+      execution_mode: null,
+      approval_when: null,
+      pre_actions: [],
+      pre_target: null,
+    }
+    vi.mocked(getInterventionRunbook).mockResolvedValue(runbook)
+    const { client, Wrapper } = createWrapper()
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useInterventionRunbookQuery('call_flow:2', enabled),
+      { initialProps: { enabled: false }, wrapper: Wrapper },
+    )
+
+    expect(result.current.fetchStatus).toBe('idle')
+    expect(getInterventionRunbook).not.toHaveBeenCalled()
+    const query = client.getQueryCache().find({
+      queryKey: dashboardQueryKeys.runbook('call_flow:2'),
+    })
+    const options = query?.options as
+      | (NonNullable<typeof query>['options'] & { refetchInterval?: number })
+      | undefined
+    expect(options?.refetchInterval).toBeUndefined()
+
+    rerender({ enabled: true })
+    await waitFor(() => expect(result.current.data).toEqual(runbook))
+    expect(vi.mocked(getInterventionRunbook).mock.calls[0]).toEqual([
+      'call_flow:2',
+      expect.any(AbortSignal),
+    ])
   })
 })

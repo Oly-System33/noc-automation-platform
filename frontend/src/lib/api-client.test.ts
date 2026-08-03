@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, apiRequest, buildApiUrl, getJson } from '@/lib/api-client'
+import {
+  ApiError,
+  apiRequest,
+  buildApiUrl,
+  getJson,
+  postJson,
+  requestJson,
+} from '@/lib/api-client'
 
 describe('cliente HTTP', () => {
   it('construye una URL desde la base configurada', () => {
@@ -64,6 +71,33 @@ describe('cliente HTTP', () => {
 
     await expect(apiRequest<{ status: string }>('/health')).resolves.toEqual({
       status: 'ok',
+    })
+  })
+
+  it('envía método, cuerpo JSON opcional y señal con requestJson/postJson', async () => {
+    const controller = new AbortController()
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify({ success: true }))),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await postJson('/api/actions/7', {
+      body: { note: 'aprobado' },
+      signal: controller.signal,
+    })
+    await requestJson('/api/actions/8', { method: 'DELETE' })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, 'http://localhost:8000/api/actions/7', {
+      body: JSON.stringify({ note: 'aprobado' }),
+      headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+      signal: controller.signal,
+    })
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      body: undefined,
+      method: 'DELETE',
     })
   })
 })

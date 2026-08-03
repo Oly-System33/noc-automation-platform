@@ -1,12 +1,22 @@
 import {
   ApiError,
   getJson,
+  postJson,
 } from '@/lib/api-client'
 
 import type {
+  ApproveScheduledActionResponse,
+  DashboardApprovalListResponse,
   DashboardIncidentListResponse,
+  DashboardInterventionListResponse,
+  DashboardOperationListResponse,
   DashboardSummaryResponse,
   HealthResponse,
+  InterventionRunbookResponse,
+  PauseScheduledActionResponse,
+  RejectScheduledActionResponse,
+  ResumeScheduledActionResponse,
+  RetryInterventionResponse,
 } from './dashboard-api.types'
 
 function isUnavailableHealthResponse(value: unknown): value is HealthResponse {
@@ -48,4 +58,109 @@ export function getRecentIncidents({ limit, signal }: RecentIncidentsOptions) {
     signal,
     query: { limit },
   })
+}
+
+type ListOptions = {
+  limit: number
+  signal?: AbortSignal
+}
+
+type OperationListOptions = ListOptions & {
+  activeOnly: boolean
+}
+
+export function getDashboardOperations({
+  limit,
+  activeOnly,
+  signal,
+}: OperationListOptions) {
+  return getJson<DashboardOperationListResponse>('/api/operations', {
+    signal,
+    query: { limit, active_only: activeOnly },
+  })
+}
+
+export function getDashboardApprovals({ limit, signal }: ListOptions) {
+  return getJson<DashboardApprovalListResponse>('/api/approvals', {
+    signal,
+    query: { limit },
+  })
+}
+
+export function getDashboardInterventions({ limit, signal }: ListOptions) {
+  return getJson<DashboardInterventionListResponse>('/api/interventions', {
+    signal,
+    query: { limit },
+  })
+}
+
+export function getInterventionRunbook(
+  interventionId: string,
+  signal?: AbortSignal,
+) {
+  return getJson<InterventionRunbookResponse>(
+    `/api/interventions/${encodeURIComponent(interventionId)}/runbook`,
+    { signal },
+  )
+}
+
+type ScheduledActionMutationOptions = {
+  scheduledActionId: number
+  signal?: AbortSignal
+}
+
+export function pauseScheduledAction({
+  scheduledActionId,
+  reason,
+  signal,
+}: ScheduledActionMutationOptions & { reason?: string | null }) {
+  return postJson<PauseScheduledActionResponse>(
+    `/api/scheduled-actions/${scheduledActionId}/pause`,
+    { body: reason === undefined ? undefined : { reason }, signal },
+  )
+}
+
+export function resumeScheduledAction({
+  scheduledActionId,
+  signal,
+}: ScheduledActionMutationOptions) {
+  return postJson<ResumeScheduledActionResponse>(
+    `/api/scheduled-actions/${scheduledActionId}/resume`,
+    { signal },
+  )
+}
+
+export function approveScheduledAction({
+  scheduledActionId,
+  note,
+  signal,
+}: ScheduledActionMutationOptions & { note?: string | null }) {
+  return postJson<ApproveScheduledActionResponse>(
+    `/api/scheduled-actions/${scheduledActionId}/approve`,
+    { body: note === undefined ? undefined : { note }, signal },
+  )
+}
+
+export function rejectScheduledAction({
+  scheduledActionId,
+  note,
+  signal,
+}: ScheduledActionMutationOptions & { note?: string | null }) {
+  return postJson<RejectScheduledActionResponse>(
+    `/api/scheduled-actions/${scheduledActionId}/reject`,
+    { body: note === undefined ? undefined : { note }, signal },
+  )
+}
+
+export function retryIntervention({
+  interventionId,
+  signal,
+}: {
+  interventionId: string
+  signal?: AbortSignal
+}) {
+  return postJson<RetryInterventionResponse>(
+    `/api/interventions/${encodeURIComponent(interventionId)}/retry`,
+    { signal },
+  )
 }

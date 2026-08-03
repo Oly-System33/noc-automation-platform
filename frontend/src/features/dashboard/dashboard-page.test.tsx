@@ -66,15 +66,18 @@ describe('Dashboard principal integrado', () => {
     expect(within(table).getByText('—')).toBeInTheDocument()
   })
 
-  it('mantiene operaciones, aprobaciones e intervención manual estáticas', () => {
+  it('renderiza operaciones, aprobaciones e intervenciones reales', async () => {
     renderDashboard()
 
     expect(screen.getByText('Operaciones activas')).toBeInTheDocument()
     expect(screen.getByText('Aprobaciones pendientes')).toBeInTheDocument()
     expect(screen.getByText('Requiere intervención manual')).toBeInTheDocument()
-    expect(screen.getByLabelText('3 elementos')).toHaveTextContent('3')
-    expect(screen.getAllByText('Ver runbook')).toHaveLength(3)
-    expect(screen.getAllByText('Reintentar flujo')).toHaveLength(3)
+    expect(await screen.findByLabelText('1 elementos')).toHaveTextContent('1')
+    expect(within(screen.getByRole('table', { name: 'Operaciones activas' })).getByText('jira')).toBeInTheDocument()
+    expect(screen.getByText('script / NOC')).toBeInTheDocument()
+    expect(screen.getByText('Confirmación manual requerida')).toBeInTheDocument()
+    expect(screen.getAllByText('Ver runbook')).toHaveLength(1)
+    expect(screen.getAllByText('Reintentar flujo')).toHaveLength(1)
     expect(screen.queryByText('Abrir Jira')).not.toBeInTheDocument()
   })
 
@@ -101,25 +104,40 @@ describe('Dashboard principal integrado', () => {
     expect(screen.getByLabelText('DB: no disponible')).toBeInTheDocument()
   })
 
-  it('los botones estáticos no generan requests adicionales', async () => {
+  it('pausa y aprueba mediante los endpoints reales', async () => {
     const user = userEvent.setup()
     const { fetchMock } = renderDashboard({ health: healthResponse })
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
 
-    await user.click(screen.getAllByRole('button', { name: /^Pausar/ })[0])
-    await user.click(screen.getAllByRole('button', { name: /^Aprobar/ })[0])
-    await user.click(screen.getAllByRole('button', { name: /^Ver runbook/ })[0])
-    await user.click(
-      screen.getAllByRole('button', { name: /^Reintentar flujo/ })[0],
-    )
+    const pauseButton = await screen.findByRole('button', { name: /^Pausar/ })
+    const approveButton = await screen.findByRole('button', { name: /^Aprobar/ })
+    await user.click(pauseButton)
+    await user.click(approveButton)
 
-    expect(fetchMock).toHaveBeenCalledTimes(3)
-    const urls = fetchMock.mock.calls.map(([url]) => String(url))
-    expect(urls.some((url) => url.includes('/api/operations'))).toBe(false)
-    expect(urls.some((url) => url.includes('/api/approvals'))).toBe(false)
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.map(([url, init]) => ({ url: String(url), method: init?.method }))
+      expect(calls).toContainEqual(expect.objectContaining({ url: expect.stringContaining('/api/scheduled-actions/41/pause'), method: 'POST' }))
+      expect(calls).toContainEqual(expect.objectContaining({ url: expect.stringContaining('/api/scheduled-actions/51/approve'), method: 'POST' }))
+    })
   })
 
-  it('refresca health, summary e incidentes manualmente', async () => {
+  it('consulta runbook solo al abrir y controla retry no seguro', async () => {
+    const user = userEvent.setup()
+    const { fetchMock } = renderDashboard()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/runbook'))).toBe(false)
+
+    await user.click(await screen.findByRole('button', { name: 'Ver runbook' }))
+    expect(await screen.findByText('Runbook asociado')).toBeInTheDocument()
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/runbook'))).toBe(true))
+    await user.click(screen.getByRole('button', { name: 'Cerrar runbook' }))
+
+    await user.click(screen.getByRole('button', { name: /Reintento no seguro/ }))
+    expect(screen.getByRole('status')).toHaveTextContent('El reintento no es seguro')
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith('/retry') && init?.method === 'POST')).toBe(false)
+  })
+
+  it('refresca las seis consultas principales manualmente', async () => {
     const user = userEvent.setup()
     const { fetchMock } = renderDashboard()
     const refreshButton = screen.getByRole('button', {
@@ -127,9 +145,9 @@ describe('Dashboard principal integrado', () => {
     })
 
     await waitFor(() => expect(refreshButton).toBeEnabled())
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
-    await user.click(refreshButton)
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
+    await user.click(refreshButton)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(12))
 
     const paths = fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)
     expect(paths.filter((path) => path === '/health')).toHaveLength(2)
@@ -137,6 +155,9 @@ describe('Dashboard principal integrado', () => {
       paths.filter((path) => path === '/api/dashboard/summary'),
     ).toHaveLength(2)
     expect(paths.filter((path) => path === '/api/incidents')).toHaveLength(2)
+    expect(paths.filter((path) => path === '/api/operations')).toHaveLength(2)
+    expect(paths.filter((path) => path === '/api/approvals')).toHaveLength(2)
+    expect(paths.filter((path) => path === '/api/interventions')).toHaveLength(2)
   })
 
   it('mantiene la navegación básica hacia los placeholders', async () => {

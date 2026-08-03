@@ -67,3 +67,19 @@ carga, lista vacía y error, sin reemplazar datos fallidos por valores mock.
 Operaciones, aprobaciones e intervención manual continúan usando datos estáticos
 de F2. Sus botones siguen siendo exclusivamente visuales. Las líneas de tendencia
 de los KPI también continúan siendo decorativas y no representan series reales.
+
+## Integración F4
+
+Operaciones, aprobaciones e intervenciones se obtienen desde `/api/operations`,
+`/api/approvals` y `/api/interventions`. Pausa, reanudación, aprobación y rechazo
+usan las transiciones persistidas de scheduled actions. Las mutations invalidan
+solo resumen, incidentes y listas operativas afectadas.
+
+El runbook se consulta al abrir el diálogo mediante una vista segura y
+estructurada; no se descarga Excel ni se exponen contactos. El backend actual no
+puede reintentar efectos externos de forma idempotente, por lo que retry responde
+`409 retry_not_safe` y la interfaz informa la limitación sin simular éxito.
+
+Cada panel conserva datos anteriores durante polling y presenta estados propios
+de carga, vacío y error. Los conflictos `404/409` se traducen a mensajes
+controlados sin mostrar bodies internos.

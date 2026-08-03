@@ -11,6 +11,7 @@ from app.api.dashboard import (
     operations_router,
 )
 from app.api.health import router as health_router
+from app.api.interventions import router as interventions_router
 from app.api.scheduled_actions import router as scheduled_actions_router
 from app.api.vonage_webhook import router as vonage_router
 from app.api.zabbix_webhook import router as zabbix_router
@@ -63,6 +64,7 @@ app.include_router(dashboard_router)
 app.include_router(incidents_router)
 app.include_router(operations_router)
 app.include_router(approvals_router)
+app.include_router(interventions_router)
 app.include_router(scheduled_actions_router)
 app.include_router(zabbix_router)
 app.include_router(vonage_router)

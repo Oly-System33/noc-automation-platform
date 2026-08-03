@@ -165,10 +165,14 @@ GET  /api/dashboard/summary
 GET  /api/incidents
 GET  /api/operations
 GET  /api/approvals
+GET  /api/interventions
+GET  /api/interventions/{intervention_id}/runbook
 
 POST /api/scheduled-actions/{scheduled_action_id}/pause
 POST /api/scheduled-actions/{scheduled_action_id}/resume
 POST /api/scheduled-actions/{scheduled_action_id}/approve
+POST /api/scheduled-actions/{scheduled_action_id}/reject
+POST /api/interventions/{intervention_id}/retry
 ```
 
 Relevant scheduled action transitions are:

@@ -3,6 +3,8 @@ import { vi } from 'vitest'
 import type {
   DashboardIncident,
   DashboardIncidentListResponse,
+  DashboardInterventionListResponse,
+  DashboardOperationListResponse,
   DashboardSummaryResponse,
   HealthResponse,
 } from '@/features/dashboard/api/dashboard-api.types'
@@ -122,10 +124,34 @@ export const incidentsResponse: DashboardIncidentListResponse = {
   ],
 }
 
+const operationBase = {
+  event_id: 'event-operation', client: 'Banco X', host: 'host-1', trigger: 'High CPU', severity: 'High', incident_status: 'open', target: 'NOC', processing_started_at: null, paused_at: null, resumed_at: null, attempt_count: 1, created_at: '2026-08-03T11:50:00Z', pause_reason: null, cancel_reason: null, error_message: null,
+} as const
+
+export const operationsResponse: DashboardOperationListResponse = {
+  generated_at: '2026-08-03T12:00:00Z', total: 2,
+  items: [
+    { ...operationBase, scheduled_action_id: 41, action: 'jira', internal_state: 'pending', display_status: 'scheduled', scheduled_at: '2026-08-03T12:10:00Z' },
+    { ...operationBase, scheduled_action_id: 42, action: 'email', internal_state: 'paused', display_status: 'paused', scheduled_at: '2026-08-03T11:55:00Z' },
+  ],
+}
+
+export const approvalsResponse: DashboardOperationListResponse = {
+  generated_at: '2026-08-03T12:00:00Z', total: 1,
+  items: [{ ...operationBase, scheduled_action_id: 51, action: 'script', internal_state: 'pending_approval', display_status: 'pending_approval', scheduled_at: '2026-08-03T12:05:00Z' }],
+}
+
+export const interventionsResponse: DashboardInterventionListResponse = [
+  { intervention_id: 'call_flow:61', source_type: 'call_flow', source_id: 61, event_id: 'event-manual', client: 'Banco Demo', host: 'voice-01', description: 'Confirmación manual requerida', severity: 'Critical', status: 'manual_required', detected_at: '2026-08-03T11:45:00Z', attempt_count: 3, max_attempts: 3, failure_reason: 'Intervención operativa requerida', retry_supported: false, retry_blocked_reason: 'retry_not_safe', runbook_available: true },
+]
+
 type DashboardFetchOptions = {
   health?: HealthResponse
   summary?: DashboardSummaryResponse
   incidents?: DashboardIncidentListResponse
+  operations?: DashboardOperationListResponse
+  approvals?: DashboardOperationListResponse
+  interventions?: DashboardInterventionListResponse
   failingPaths?: string[]
 }
 
@@ -133,9 +159,12 @@ export function installDashboardFetchMock({
   health = healthResponse,
   summary = summaryResponse,
   incidents = incidentsResponse,
+  operations = operationsResponse,
+  approvals = approvalsResponse,
+  interventions = interventionsResponse,
   failingPaths = [],
 }: DashboardFetchOptions = {}) {
-  const fetchMock = vi.fn(async (input: string | URL | Request) => {
+  const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const requestUrl =
       typeof input === 'string'
         ? input
@@ -143,6 +172,7 @@ export function installDashboardFetchMock({
           ? input.toString()
           : input.url
     const url = new URL(requestUrl)
+    const method = init?.method ?? 'GET'
 
     if (failingPaths.includes(url.pathname)) {
       return new Response(JSON.stringify({ detail: 'internal-sensitive-data' }), {
@@ -165,6 +195,19 @@ export function installDashboardFetchMock({
     if (url.pathname === '/api/incidents') {
       return Response.json(incidents)
     }
+
+    if (url.pathname === '/api/operations') return Response.json(operations)
+    if (url.pathname === '/api/approvals') return Response.json(approvals)
+    if (url.pathname === '/api/interventions' && method === 'GET') return Response.json(interventions)
+    if (url.pathname.endsWith('/runbook') && method === 'GET') return Response.json({ intervention_id: 'call_flow:61', source: 'current_runbook', warning: 'Runbook actual', actions: ['calls'], target: 'NOC', delay_minutes: 0, execution_mode: 'immediate', approval_when: 'never', pre_actions: [], pre_target: null })
+    if (url.pathname.includes('/api/scheduled-actions/') && method === 'POST') {
+      const id = Number(url.pathname.split('/')[3])
+      if (url.pathname.endsWith('/pause')) return Response.json({ success: true, scheduled_action_id: id, state: 'paused' })
+      if (url.pathname.endsWith('/resume')) return Response.json({ success: true, scheduled_action_id: id, state: 'processing', execution_started: true }, { status: 202 })
+      if (url.pathname.endsWith('/approve')) return Response.json({ success: true, scheduled_action_id: id, previous_state: 'pending_approval', state: 'processing', approved: true, execution_started: true }, { status: 202 })
+      if (url.pathname.endsWith('/reject')) return Response.json({ success: true, scheduled_action_id: id, previous_state: 'pending_approval', state: 'cancelled', rejected: true })
+    }
+    if (url.pathname.endsWith('/retry') && method === 'POST') return Response.json({ detail: 'retry_not_safe', code: 'retry_not_safe' }, { status: 409 })
 
     throw new Error(`Unexpected test request: ${url.pathname}`)
   })

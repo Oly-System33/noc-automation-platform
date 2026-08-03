@@ -144,12 +144,22 @@ def list_dashboard_operations(
         DashboardOperationStatus | None,
         Query(description="Visible operation status."),
     ] = None,
+    active_only: Annotated[
+        bool,
+        Query(
+            description=(
+                "Return only scheduled, paused, executing, or stuck "
+                "operations."
+            ),
+        ),
+    ] = False,
 ):
     return _execute_query(
         lambda: dashboard_query_service.list_operations(
             limit=limit,
             client=client,
             status=status,
+            active_only=active_only,
         ),
         unexpected_detail="Unable to retrieve dashboard data",
     )

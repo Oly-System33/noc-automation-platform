@@ -24,7 +24,7 @@ describe('aplicación', () => {
     expect(
       screen.getByRole('heading', { name: 'Dashboard principal' }),
     ).toBeInTheDocument()
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
   })
 
   it('navega mediante React Router', async () => {

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { compactIncidentId } from '@/features/dashboard/mappers/dashboard-data.mapper'
+import {
+  mapApprovalsToUi,
+  mapInterventionsToUi,
+  mapOperationsToUi,
+} from '@/features/dashboard/mappers/dashboard-actions.mapper'
 import { mapHealthQueryState } from '@/features/dashboard/mappers/dashboard-health.mapper'
 import { mapSeverityToLabel } from '@/features/dashboard/mappers/dashboard-severity.mapper'
 import { mapDashboardStatusToLabel } from '@/features/dashboard/mappers/dashboard-status.mapper'
@@ -9,6 +14,11 @@ import {
   formatCompactDuration,
   formatPollingInterval,
 } from '@/features/dashboard/mappers/dashboard-time.mapper'
+import {
+  approvalsResponse,
+  interventionsResponse,
+  operationsResponse,
+} from '@/test/dashboard-api-mock'
 
 describe('mappers del dashboard', () => {
   it.each([
@@ -102,5 +112,30 @@ describe('mappers del dashboard', () => {
         isError: true,
       }),
     ).toEqual({ api: 'unavailable', database: 'warning' })
+  })
+
+  it('mapea controles operativos solo para estados válidos', () => {
+    const operations = mapOperationsToUi(operationsResponse)
+
+    expect(operations[0].control).toBe('Pausar')
+    expect(operations[1].control).toBe('Reanudar')
+    expect(operations[0].attempts).toBe('1')
+    expect(operations[0].rowId).not.toBe(operations[1].rowId)
+  })
+
+  it('mapea aprobaciones e intervenciones sin inventar datos', () => {
+    const approvals = mapApprovalsToUi(approvalsResponse)
+    const interventions = mapInterventionsToUi(interventionsResponse)
+
+    expect(approvals[0]).toMatchObject({
+      scheduledActionId: 51,
+      objective: 'script / NOC',
+      reason: 'High CPU',
+    })
+    expect(interventions[0]).toMatchObject({
+      interventionId: 'call_flow:61',
+      retrySupported: false,
+      runbookAvailable: true,
+    })
   })
 })

@@ -444,6 +444,80 @@ class ScheduledActionPersistenceTest(unittest.TestCase):
         first_query.update.assert_called_once()
         second_query.update.assert_not_called()
 
+    def test_pending_approval_can_be_rejected_atomically_with_audit(self):
+        session, query = build_session()
+        record = SimpleNamespace(
+            id=15,
+            event_id="event-1",
+            state="pending_approval",
+            cancelled_at=None,
+            cancel_reason=None,
+            processing_started_at=NOW,
+        )
+        query.one_or_none.return_value = record
+
+        with patch(
+            "app.services.persistence_service.SessionLocal",
+            return_value=session,
+        ), patch.object(self.service, "_now", return_value=NOW):
+            result = self.service.reject_pending_approval_action(
+                15,
+                source='dashboard_api {"token":"source-secret"}',
+                note='Operator rejected {"password":"hunter2"}',
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["previous_state"], "pending_approval")
+        self.assertEqual(result["state"], "cancelled")
+        self.assertEqual(record.state, "cancelled")
+        self.assertEqual(record.cancelled_at, NOW)
+        self.assertEqual(record.cancel_reason, "operator_rejected")
+        self.assertIsNone(record.processing_started_at)
+        query.with_for_update.assert_called_once_with()
+        session.begin.assert_called_once_with()
+        audit = session.add.call_args.args[0]
+        self.assertIsInstance(audit, AuditLogRecord)
+        self.assertEqual(audit.message, "approval_rejected")
+        self.assertEqual(audit.details["scheduled_action_id"], 15)
+        self.assertEqual(audit.details["previous_state"], "pending_approval")
+        self.assertEqual(audit.details["new_state"], "cancelled")
+        self.assertNotIn("secret", json.dumps(audit.details))
+        self.assertNotIn("hunter2", json.dumps(audit.details))
+
+    def test_rejection_conflicts_for_wrong_and_repeated_states(self):
+        for state in ("pending", "processing", "cancelled", "executed"):
+            with self.subTest(state=state):
+                session, query = build_session()
+                query.one_or_none.return_value = SimpleNamespace(
+                    id=15,
+                    event_id="event-1",
+                    state=state,
+                )
+
+                with patch(
+                    "app.services.persistence_service.SessionLocal",
+                    return_value=session,
+                ):
+                    result = self.service.reject_pending_approval_action(15)
+
+                self.assertEqual(result["error"], "invalid_state_transition")
+                self.assertEqual(result["state"], state)
+                session.add.assert_not_called()
+
+    def test_rejection_returns_not_found(self):
+        session, query = build_session()
+        query.one_or_none.return_value = None
+
+        with patch(
+            "app.services.persistence_service.SessionLocal",
+            return_value=session,
+        ):
+            result = self.service.reject_pending_approval_action(999)
+
+        self.assertEqual(result["error"], "scheduled_action_not_found")
+        self.assertIsNone(result["state"])
+        session.add.assert_not_called()
+
 
 class ScheduledActionExecutorTest(unittest.TestCase):
 
@@ -950,6 +1024,127 @@ class ScheduledActionApiTest(unittest.TestCase):
         self.assertIn("500", operation["responses"])
         self.assertIn("requestBody", operation)
 
+    def test_reject_endpoint_succeeds_without_executor(self):
+        result = {
+            "success": True,
+            "scheduled_action_id": 15,
+            "previous_state": "pending_approval",
+            "state": "cancelled",
+            "error": None,
+        }
+
+        with patch.object(
+            scheduled_actions.persistence_service,
+            "reject_pending_approval_action",
+            return_value=result,
+        ) as reject, patch.object(
+            scheduled_actions.scheduled_action_executor,
+            "execute",
+        ) as execute:
+            response = scheduled_actions.reject_scheduled_action(
+                15,
+                scheduled_actions.RejectScheduledActionRequest(
+                    note="Not authorized"
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.body), {
+            "success": True,
+            "scheduled_action_id": 15,
+            "previous_state": "pending_approval",
+            "state": "cancelled",
+            "rejected": True,
+        })
+        reject.assert_called_once_with(
+            15,
+            source="dashboard_api",
+            note="Not authorized",
+        )
+        execute.assert_not_called()
+
+    def test_reject_endpoint_maps_not_found_conflict_and_internal_error(self):
+        cases = [
+            ("scheduled_action_not_found", None, 404),
+            ("invalid_state_transition", "cancelled", 409),
+            ("database exploded token=secret", None, 500),
+        ]
+
+        for error, state, expected_status in cases:
+            with self.subTest(error=error), patch.object(
+                scheduled_actions.persistence_service,
+                "reject_pending_approval_action",
+                return_value={
+                    "success": False,
+                    "scheduled_action_id": 15,
+                    "state": state,
+                    "error": error,
+                },
+            ), patch.object(
+                scheduled_actions.scheduled_action_executor,
+                "execute",
+            ) as execute:
+                response = scheduled_actions.reject_scheduled_action(15)
+
+            body = json.loads(response.body)
+            self.assertEqual(response.status_code, expected_status)
+            self.assertEqual(
+                body["error"],
+                error if expected_status != 500 else "internal_error",
+            )
+            self.assertNotIn("secret", response.body.decode())
+            execute.assert_not_called()
+
+        with patch.object(
+            scheduled_actions.persistence_service,
+            "reject_pending_approval_action",
+            side_effect=RuntimeError("password=secret"),
+        ), patch.object(
+            scheduled_actions.scheduled_action_executor,
+            "execute",
+        ) as execute:
+            response = scheduled_actions.reject_scheduled_action(15)
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(json.loads(response.body)["error"], "internal_error")
+        self.assertNotIn("secret", response.body.decode())
+        execute.assert_not_called()
+
+    def test_reject_endpoint_is_documented_and_validates_note(self):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        operation = app.openapi()["paths"][
+            "/api/scheduled-actions/{scheduled_action_id}/reject"
+        ]["post"]
+
+        self.assertEqual(
+            operation["responses"]["200"]["content"][
+                "application/json"
+            ]["schema"]["$ref"],
+            "#/components/schemas/RejectScheduledActionResponse",
+        )
+        self.assertIn("404", operation["responses"])
+        self.assertIn("409", operation["responses"])
+        self.assertIn("500", operation["responses"])
+        note_schema = app.openapi()["components"]["schemas"][
+            "RejectScheduledActionRequest"
+        ]["properties"]["note"]
+        self.assertIn("maxLength", json.dumps(note_schema))
+
+        with patch.object(
+            scheduled_actions.persistence_service,
+            "reject_pending_approval_action",
+        ) as reject:
+            response = TestClient(app).post(
+                "/api/scheduled-actions/15/reject",
+                json={"note": "x" * 501},
+            )
+
+        self.assertEqual(response.status_code, 422)
+        reject.assert_not_called()
+
     def test_routes_are_registered(self):
         from app.main import app
 
@@ -962,6 +1157,7 @@ class ScheduledActionApiTest(unittest.TestCase):
         self.assertIn(("/api/scheduled-actions/{scheduled_action_id}/pause", "POST"), routes)
         self.assertIn(("/api/scheduled-actions/{scheduled_action_id}/resume", "POST"), routes)
         self.assertIn(("/api/scheduled-actions/{scheduled_action_id}/approve", "POST"), routes)
+        self.assertIn(("/api/scheduled-actions/{scheduled_action_id}/reject", "POST"), routes)
         self.assertIn(("/api/approvals", "GET"), routes)
         self.assertIn(("/api/operations", "GET"), routes)
 

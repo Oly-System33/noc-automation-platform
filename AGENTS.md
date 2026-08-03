@@ -177,6 +177,11 @@ must use explicit loading and error states and must never silently fall back to
 mock dashboard data. Static sections must remain clearly separated from API
 data until their integration is explicitly requested.
 
+Dashboard mutations must reuse persisted scheduled-action transitions and
+invalidate only affected query groups. Never report an external-action retry as
+successful unless the backend has safely claimed it. Runbook responses must use
+an explicit allowlist and must not expose contact details or raw Excel content.
+
 `docs/ui/dashboard-main-reference.png` is the mandatory and definitive visual
 reference. `docs/ui/noc-logo-reference.png` is the mandatory definitive logo.
 Do not change the dashboard distribution without an explicit task, improvise

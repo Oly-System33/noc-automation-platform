@@ -33,6 +33,18 @@ class ApproveScheduledActionResponse(BaseModel):
     execution_started: bool
 
 
+class RejectScheduledActionRequest(BaseModel):
+    note: str | None = Field(default=None, max_length=500)
+
+
+class RejectScheduledActionResponse(BaseModel):
+    success: bool
+    scheduled_action_id: int
+    previous_state: str
+    state: str
+    rejected: bool
+
+
 class ScheduledActionErrorResponse(BaseModel):
     success: bool
     scheduled_action_id: int
@@ -182,5 +194,62 @@ def approve_scheduled_action(
             "state": result.get("state"),
             "approved": True,
             "execution_started": True,
+        },
+    )
+
+
+@router.post(
+    "/{scheduled_action_id}/reject",
+    response_model=RejectScheduledActionResponse,
+    responses={
+        404: {
+            "model": ScheduledActionErrorResponse,
+            "description": "Scheduled action not found",
+        },
+        409: {
+            "model": ScheduledActionErrorResponse,
+            "description": "Scheduled action cannot be rejected",
+        },
+        500: {
+            "model": ScheduledActionErrorResponse,
+            "description": "Unexpected internal error",
+        },
+    },
+    summary="Reject scheduled action",
+    description="Atomically reject and cancel a pending approval.",
+)
+def reject_scheduled_action(
+    scheduled_action_id: int,
+    payload: RejectScheduledActionRequest | None = None,
+):
+    try:
+        result = persistence_service.reject_pending_approval_action(
+            scheduled_action_id,
+            source="dashboard_api",
+            note=payload.note if payload else None,
+        )
+    except Exception as error:
+        logger.error(
+            "Unexpected scheduled action rejection error: %s",
+            type(error).__name__,
+        )
+        return _error_response({
+            "success": False,
+            "scheduled_action_id": scheduled_action_id,
+            "state": None,
+            "error": "internal_error",
+        })
+
+    if not result.get("success"):
+        return _error_response(result)
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "success": True,
+            "scheduled_action_id": scheduled_action_id,
+            "previous_state": result.get("previous_state"),
+            "state": result.get("state"),
+            "rejected": True,
         },
     )

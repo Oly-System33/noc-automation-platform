@@ -14,10 +14,15 @@ export class ApiError extends Error {
 
 type QueryValue = string | number | boolean | undefined
 
-type GetJsonOptions = {
+export type RequestJsonOptions = {
+  body?: unknown
+  method?: string
   signal?: AbortSignal
   query?: Record<string, QueryValue>
 }
+
+export type GetJsonOptions = Omit<RequestJsonOptions, 'body' | 'method'>
+export type PostJsonOptions = Omit<RequestJsonOptions, 'method' | 'query'>
 
 export function buildApiUrl(path: string, baseUrl = env.apiBaseUrl) {
   const normalizedBaseUrl = `${baseUrl.replace(/\/+$/, '')}/`
@@ -47,9 +52,9 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
   return (await response.json()) as T
 }
 
-export async function getJson<T>(
+export async function requestJson<T>(
   path: string,
-  { signal, query }: GetJsonOptions = {},
+  { body, method = 'GET', signal, query }: RequestJsonOptions = {},
 ): Promise<T> {
   const url = new URL(buildApiUrl(path))
 
@@ -59,8 +64,21 @@ export async function getJson<T>(
     }
   }
 
-  const response = await fetch(url.toString(), { signal })
+  const response = await fetch(url.toString(), {
+    body: body === undefined ? undefined : JSON.stringify(body),
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    method,
+    signal,
+  })
   return parseJsonResponse<T>(response)
+}
+
+export function getJson<T>(path: string, options: GetJsonOptions = {}) {
+  return requestJson<T>(path, options)
+}
+
+export function postJson<T>(path: string, options: PostJsonOptions = {}) {
+  return requestJson<T>(path, { ...options, method: 'POST' })
 }
 
 export async function apiRequest<T>(

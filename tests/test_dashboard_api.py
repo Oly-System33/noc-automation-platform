@@ -186,6 +186,7 @@ class DashboardApiTest(unittest.TestCase):
             limit=100,
             client=None,
             status=None,
+            active_only=False,
         )
 
     def test_operations_accept_boundaries_and_pass_filters(self):
@@ -219,6 +220,7 @@ class DashboardApiTest(unittest.TestCase):
                         "limit": limit,
                         "client": "Banco X",
                         "status": status,
+                        "active_only": "true",
                     },
                 )
 
@@ -227,6 +229,7 @@ class DashboardApiTest(unittest.TestCase):
                     limit=limit,
                     client="Banco X",
                     status=expected_status,
+                    active_only=True,
                 )
 
     def test_operations_reject_invalid_limit_and_status(self):
@@ -344,7 +347,7 @@ class DashboardApiTest(unittest.TestCase):
         )
         self.assertEqual(
             {parameter["name"] for parameter in operations["parameters"]},
-            {"limit", "client", "status"},
+            {"limit", "client", "status", "active_only"},
         )
         self.assertEqual(
             {parameter["name"] for parameter in approvals["parameters"]},
