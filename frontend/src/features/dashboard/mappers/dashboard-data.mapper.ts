@@ -14,6 +14,10 @@ import type {
 
 const DASH = '—'
 
+function formatTimestamp(value: string | null) {
+  return value ? value.replace('T', ' ').slice(0, 16) : DASH
+}
+
 export function mapSummaryCountsToKpis(
   counts?: DashboardStatusCounts,
 ): KpiItem[] {
@@ -45,6 +49,10 @@ export function mapIncidentToUi(
     status: mapDashboardStatusToLabel(incident.display_status),
     action: incident.current_action?.trim() || null,
     time: formatCompactAge(incident.opened_at, generatedAt),
+    openedAt: formatTimestamp(incident.opened_at),
+    closedAt: formatTimestamp(incident.closed_at),
+    duration: incident.duration?.trim() || DASH,
+    currentAction: incident.current_action?.trim() || DASH,
   }
 }
 

@@ -7,6 +7,9 @@ from fastapi.responses import JSONResponse
 from app.schemas.interventions import (
     InterventionErrorResponse,
     InterventionItem,
+    InterventionListResponse,
+    InterventionSourceType,
+    InterventionStatus,
     InterventionRunbook,
 )
 from app.services.intervention_service import (
@@ -51,14 +54,21 @@ def _execute(operation: Callable):
 
 @router.get(
     "",
-    response_model=list[InterventionItem],
+    response_model=InterventionListResponse,
     responses={503: ERROR_RESPONSES[503], 500: ERROR_RESPONSES[500]},
     summary="List interventions",
 )
 def list_interventions(
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    search: Annotated[str | None, Query(max_length=200)] = None,
+    source_type: Annotated[InterventionSourceType | None, Query()] = None,
+    status: Annotated[InterventionStatus | None, Query()] = None,
 ):
-    return _execute(lambda: intervention_service.list_interventions(limit=limit))
+    return _execute(lambda: intervention_service.list_interventions(
+        limit=limit, offset=offset, search=search, source_type=source_type,
+        status=status,
+    ))
 
 
 @router.post(

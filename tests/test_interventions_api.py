@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.api.interventions import router
 from app.main import app as main_app
-from app.schemas.interventions import InterventionItem
+from app.schemas.interventions import InterventionItem, InterventionListResponse
 from app.services.intervention_service import (
     InterventionDataError,
     InterventionNotFound,
@@ -35,13 +35,18 @@ class InterventionsApiTest(unittest.TestCase):
             failure_reason="Event processing failed",
         )
         with patch.object(
-            intervention_service, "list_interventions", return_value=[item]
+            intervention_service, "list_interventions", return_value=InterventionListResponse(
+                items=[item], total=1, limit=3, offset=0,
+                generated_at=datetime(2026, 8, 3, tzinfo=timezone.utc),
+            )
         ) as list_interventions:
             response = self.client.get("/api/interventions", params={"limit": 3})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()[0]["intervention_id"], "processed_event:3")
-        list_interventions.assert_called_once_with(limit=3)
+        self.assertEqual(response.json()["items"][0]["intervention_id"], "processed_event:3")
+        list_interventions.assert_called_once_with(
+            limit=3, offset=0, search=None, source_type=None, status=None
+        )
 
         for limit in (0, 101):
             with self.subTest(limit=limit):
@@ -98,7 +103,10 @@ class InterventionsApiTest(unittest.TestCase):
         retry = schema["paths"]["/api/interventions/{intervention_id}/retry"]["post"]
         runbook = schema["paths"]["/api/interventions/{intervention_id}/runbook"]["get"]
 
-        self.assertEqual(listing["parameters"][0]["name"], "limit")
+        self.assertEqual(
+            {parameter["name"] for parameter in listing["parameters"]},
+            {"limit", "offset", "search", "source_type", "status"},
+        )
         self.assertIn("503", listing["responses"])
         self.assertIn("409", retry["responses"])
         self.assertEqual(

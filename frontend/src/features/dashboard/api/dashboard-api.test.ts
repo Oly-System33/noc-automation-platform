@@ -78,6 +78,8 @@ describe('API del dashboard', () => {
     const incidents = {
       items: [],
       total: 0,
+      limit: 6,
+      offset: 0,
       generated_at: '2026-08-03T12:00:00Z',
     }
     const fetchMock = vi
@@ -104,7 +106,7 @@ describe('API del dashboard', () => {
   })
 
   it('consulta operaciones, aprobaciones, intervenciones y runbook con sus parámetros', async () => {
-    const response = { items: [], total: 0, generated_at: '2026-08-03T12:00:00Z' }
+    const response = { items: [], total: 0, limit: 5, offset: 0, generated_at: '2026-08-03T12:00:00Z' }
     const runbook = {
       intervention_id: 'scheduled_action:4',
       source: 'persisted_action_plan' as const,
@@ -121,7 +123,7 @@ describe('API del dashboard', () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify(response)))
       .mockResolvedValueOnce(new Response(JSON.stringify(response)))
-      .mockResolvedValueOnce(new Response(JSON.stringify([])))
+      .mockResolvedValueOnce(new Response(JSON.stringify(response)))
       .mockResolvedValueOnce(new Response(JSON.stringify(runbook)))
     vi.stubGlobal('fetch', fetchMock)
     const signal = new AbortController().signal

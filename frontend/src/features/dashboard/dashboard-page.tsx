@@ -22,7 +22,6 @@ import {
   DashboardNotification,
   type DashboardNotice,
 } from '@/features/dashboard/components/dashboard-notification'
-import { DashboardSidebar } from '@/features/dashboard/components/dashboard-sidebar'
 import { IncidentsTable } from '@/features/dashboard/components/incidents-table'
 import { KpiGrid } from '@/features/dashboard/components/kpi-grid'
 import { ManualInterventionTable } from '@/features/dashboard/components/manual-intervention-table'
@@ -171,9 +170,7 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="flex h-svh min-w-0 overflow-hidden bg-background">
-      <DashboardSidebar apiState={health.api} databaseState={health.database} />
-      <main className="noc-scrollbar min-w-0 flex-1 overflow-y-auto p-2">
+    <>
         <div className="flex min-h-full flex-col gap-2 min-[1100px]:h-full min-[1100px]:min-h-0">
           <DashboardHeader apiState={health.api} databaseState={health.database} pollingLabel={formatPollingInterval(env.pollIntervalMs)} lastUpdatedLabel={lastUpdatedLabel} isRefreshing={isRefreshing} onRefresh={refreshDashboard} />
           <KpiGrid counts={summaryQuery.data?.counts} isLoading={summaryQuery.isPending} isError={summaryQuery.isError} isRetrying={summaryQuery.isFetching} onRetry={() => void summaryQuery.refetch()} />
@@ -187,9 +184,8 @@ export function DashboardPage() {
             <ApprovalsTable approvals={approvals} hasResponse={approvalsQuery.data !== undefined} isLoading={approvalsQuery.isPending} isError={approvalsQuery.isError} isFetching={approvalsQuery.isFetching} pendingId={pendingApprovalId} onRetry={() => void approvalsQuery.refetch()} onApprove={approveAction} onReject={rejectAction} />
           </div>
         </div>
-      </main>
       <DashboardNotification notice={notice} onClose={() => setNotice(null)} />
       <RunbookDialog intervention={selectedIntervention} open={selectedIntervention !== null} onOpenChange={(open) => !open && setSelectedIntervention(null)} />
-    </div>
+    </>
   )
 }

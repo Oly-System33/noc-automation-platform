@@ -6,6 +6,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.models import (
     ActionRecord,
+    AuditLogRecord,
+    CallAttemptRecord,
     CallFlowRecord,
     EventRecord,
     IncidentRecord,
@@ -61,6 +63,10 @@ class FakeQuery:
             rows = rows[:self.limit_value]
 
         return rows
+
+    def first(self):
+        rows = self.all()
+        return rows[0] if rows else None
 
 
 class FakeSession:
@@ -595,7 +601,8 @@ class DashboardQueryServiceTest(unittest.TestCase):
 
         response = service.list_incidents(limit=1000)
 
-        self.assertEqual(len(response.items), 500)
+        self.assertEqual(len(response.items), 100)
+        self.assertEqual(response.limit, 100)
         self.assertEqual(response.total, 502)
 
     def test_status_filter_is_applied_before_limit_and_total(self):
@@ -855,6 +862,10 @@ class DashboardQueryServiceTest(unittest.TestCase):
         self.assertEqual(len(response.items), 1)
         self.assertEqual(response.items[0].event_id, "newer")
 
+        exact = service.list_operations(event_id="older")
+        self.assertEqual(exact.total, 1)
+        self.assertEqual(exact.items[0].event_id, "older")
+
     def test_active_operations_are_filtered_before_limit(self):
         states = [
             "executed",
@@ -943,6 +954,7 @@ class DashboardQueryServiceTest(unittest.TestCase):
             )
             for index, state in enumerate(states, start=1)
         ]
+        records[0].execution_mode = "manual_approval"
         service, session = self.build_service({
             ScheduledActionRecord: records,
         })
@@ -953,10 +965,66 @@ class DashboardQueryServiceTest(unittest.TestCase):
         self.assertEqual(len(response.items), 1)
         self.assertEqual(response.items[0].action, "jira, telegram")
         self.assertTrue(all(
-            item.internal_state == "pending_approval"
+            item.operation_state == "pending_approval"
             for item in response.items
         ))
-        self.assertEqual(session.execution_count, 2)
+        self.assertEqual(response.items[0].decision, "pending")
+        self.assertEqual(session.execution_count, 1)
+
+    def test_approval_history_keeps_ambiguous_cancellation_undecided(self):
+        pending = make_scheduled("pending_approval", record_id=1)
+        approved = make_scheduled("executed", record_id=2)
+        cancelled = make_scheduled("cancelled", record_id=3)
+        for record in (pending, approved, cancelled):
+            record.execution_mode = "manual_approval"
+            record.approval_requested_at = record.created_at
+        approved.approval_decision = "approved"
+        approved.approval_decided_at = NOW
+        service, _ = self.build_service({
+            ScheduledActionRecord: [pending, approved, cancelled],
+        })
+
+        queue = service.list_approvals()
+        history = service.list_approvals(status="all")
+
+        self.assertEqual([item.scheduled_action_id for item in queue.items], [1])
+        self.assertEqual(history.total, 3)
+        ambiguous = next(item for item in history.items if item.scheduled_action_id == 3)
+        self.assertIsNone(ambiguous.decision)
+        self.assertIsNone(ambiguous.decided_at)
+
+    def test_incident_detail_omits_sensitive_persistence_fields(self):
+        incident = make_incident()
+        action = make_action()
+        action.target = "+15551234567"
+        action.response = {"token": "secret"}
+        attempt = CallAttemptRecord(
+            event_id="event-1", call_flow_id=1, attempt_number=1,
+            phone="+15551234567", vonage_uuid="uuid-secret",
+            dtmf_digit="1", state="completed",
+        )
+        attempt.id = 8
+        attempt.created_at = NOW
+        attempt.updated_at = NOW
+        audit = AuditLogRecord(
+            event_id="event-1", level="INFO", component="worker",
+            message="Operation recorded", details={"token": "secret"},
+        )
+        audit.id = 9
+        audit.created_at = NOW
+        service, _ = self.build_service({
+            IncidentRecord: [incident], ActionRecord: [action],
+            CallAttemptRecord: [attempt], AuditLogRecord: [audit],
+        })
+
+        detail = service.get_incident_detail("event-1")
+        serialized = detail.model_dump_json()
+
+        self.assertNotIn("15551234567", serialized)
+        self.assertNotIn("uuid-secret", serialized)
+        self.assertNotIn("dtmf", serialized)
+        self.assertNotIn("response", serialized)
+        self.assertNotIn("token", serialized)
 
     def test_operation_database_errors_raise_controlled_exception(self):
         for fail_on_execution in (1, 2):

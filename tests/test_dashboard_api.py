@@ -15,6 +15,7 @@ from app.main import app as main_app
 from app.schemas.dashboard import (
     DashboardApprovalListResponse,
     DashboardIncidentItem,
+    DashboardIncidentDetail,
     DashboardIncidentListResponse,
     DashboardOperationItem,
     DashboardOperationListResponse,
@@ -95,14 +96,18 @@ class DashboardApiTest(unittest.TestCase):
         self.assertEqual(response.json()["items"][0]["event_id"], "event-1")
         list_incidents.assert_called_once_with(
             limit=25,
+            offset=0,
+            search=None,
             client="Banco X",
+            severity=None,
             status=DashboardStatus.PAUSED,
+            incident_status=None,
         )
 
     def test_incident_query_validation_returns_422_without_service_call(self):
         invalid_queries = [
             {"limit": 0},
-            {"limit": 501},
+            {"limit": 101},
             {"status": "not-a-status"},
         ]
 
@@ -115,6 +120,30 @@ class DashboardApiTest(unittest.TestCase):
 
                 self.assertEqual(response.status_code, 422)
                 list_incidents.assert_not_called()
+
+    def test_incident_detail_returns_bounded_safe_shape_and_404(self):
+        detail = DashboardIncidentDetail(
+            event_id="event-1", client="Banco X",
+            display_status=DashboardStatus.ACTIVE,
+            duration="5m", trigger_group="network",
+            operations=[], actions=[], call_attempts=[], approvals=[],
+            interventions=[], audit_logs=[],
+        )
+        with patch.object(
+            dashboard_query_service, "get_incident_detail", return_value=detail
+        ):
+            response = self.client.get("/api/incidents/event-1")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["trigger_group"], "network")
+        for forbidden in ("raw_payload", "contacts_payload", "phone", "vonage_uuid", "dtmf_digit", "response"):
+            self.assertNotIn(forbidden, response.text)
+
+        with patch.object(
+            dashboard_query_service, "get_incident_detail", return_value=None
+        ):
+            response = self.client.get("/api/incidents/missing")
+        self.assertEqual(response.status_code, 404)
 
     def test_controlled_query_errors_return_503_without_internal_details(self):
         with patch.object(
@@ -162,7 +191,7 @@ class DashboardApiTest(unittest.TestCase):
         )
         self.assertEqual(
             {parameter["name"] for parameter in incidents["parameters"]},
-            {"limit", "client", "status"},
+            {"limit", "offset", "search", "client", "severity", "status", "incident_status"},
         )
         self.assertIn("500", incidents["responses"])
         self.assertIn("503", incidents["responses"])
@@ -184,8 +213,12 @@ class DashboardApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         list_operations.assert_called_once_with(
             limit=100,
+            offset=0,
+            search=None,
             client=None,
             status=None,
+            action=None,
+            internal_state=None,
             active_only=False,
         )
 
@@ -205,7 +238,7 @@ class DashboardApiTest(unittest.TestCase):
         )
         cases = [
             (1, "paused", DashboardOperationStatus.PAUSED),
-            (500, "executed", DashboardOperationStatus.EXECUTED),
+            (100, "executed", DashboardOperationStatus.EXECUTED),
         ]
 
         for limit, status, expected_status in cases:
@@ -227,15 +260,19 @@ class DashboardApiTest(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 list_operations.assert_called_once_with(
                     limit=limit,
+                    offset=0,
+                    search=None,
                     client="Banco X",
                     status=expected_status,
+                    action=None,
+                    internal_state=None,
                     active_only=True,
                 )
 
     def test_operations_reject_invalid_limit_and_status(self):
         invalid_queries = [
             {"limit": 0},
-            {"limit": 501},
+            {"limit": 101},
             {"status": "invalid"},
         ]
 
@@ -284,7 +321,7 @@ class DashboardApiTest(unittest.TestCase):
         cases = [
             ({}, 100, None),
             ({"limit": 1, "client": "Banco X"}, 1, "Banco X"),
-            ({"limit": 500}, 500, None),
+            ({"limit": 100}, 100, None),
         ]
 
         for params, expected_limit, expected_client in cases:
@@ -298,11 +335,14 @@ class DashboardApiTest(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 list_approvals.assert_called_once_with(
                     limit=expected_limit,
+                    offset=0,
+                    status="pending",
+                    search=None,
                     client=expected_client,
                 )
 
     def test_approvals_validate_limits_and_map_errors(self):
-        for limit in (0, 501):
+        for limit in (0, 101):
             with self.subTest(limit=limit), patch.object(
                 dashboard_query_service,
                 "list_approvals",
@@ -347,11 +387,11 @@ class DashboardApiTest(unittest.TestCase):
         )
         self.assertEqual(
             {parameter["name"] for parameter in operations["parameters"]},
-            {"limit", "client", "status", "active_only"},
+            {"limit", "offset", "search", "client", "status", "action", "internal_state", "active_only"},
         )
         self.assertEqual(
             {parameter["name"] for parameter in approvals["parameters"]},
-            {"limit", "client"},
+            {"limit", "offset", "status", "search", "client"},
         )
 
         for endpoint in (operations, approvals):
@@ -369,6 +409,9 @@ class DashboardApiTest(unittest.TestCase):
         self.assertIn("/api/incidents", paths)
         self.assertIn("/api/operations", paths)
         self.assertIn("/api/approvals", paths)
+        self.assertIn("/api/incidents/{event_id}", paths)
+        self.assertIn("/api/audit-logs", paths)
+        self.assertIn("/api/configuration/operational", paths)
         self.assertIn("/api/scheduled-actions/{scheduled_action_id}/pause", paths)
         self.assertIn("/api/scheduled-actions/{scheduled_action_id}/resume", paths)
 

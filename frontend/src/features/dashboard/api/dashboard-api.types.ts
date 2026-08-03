@@ -34,6 +34,8 @@ export type DashboardIncident = {
   severity: string | null
   incident_status: string | null
   opened_at: string | null
+  closed_at: string | null
+  duration: string | null
   updated_at: string | null
   current_action: string | null
   target: string | null
@@ -51,6 +53,8 @@ export type DashboardIncident = {
 export type DashboardIncidentListResponse = {
   items: DashboardIncident[]
   total: number
+  limit: number
+  offset: number
   generated_at: string
 }
 
@@ -75,6 +79,10 @@ export type DashboardOperationItem = {
   pause_reason: string | null
   cancel_reason: string | null
   error_message: string | null
+  activity_at: string | null
+  executed_at: string | null
+  cancelled_at: string | null
+  max_attempts: number | null
 }
 
 export type DashboardOperationStatus =
@@ -90,10 +98,28 @@ export type DashboardOperationStatus =
 export type DashboardOperationListResponse = {
   items: DashboardOperationItem[]
   total: number
+  limit: number
+  offset: number
   generated_at: string
 }
 
-export type DashboardApprovalListResponse = DashboardOperationListResponse
+export type DashboardApprovalItem = {
+  scheduled_action_id: number
+  event_id: string
+  client: string | null
+  action: string | null
+  target: string | null
+  reason: string | null
+  decision: 'pending' | 'approved' | 'rejected' | null
+  requested_at: string | null
+  decided_at: string | null
+  operation_state: string
+  result: string | null
+  display_status: DashboardOperationStatus
+  created_at: string | null
+}
+
+export type DashboardApprovalListResponse = ListEnvelope<DashboardApprovalItem>
 
 export type InterventionSourceType =
   | 'scheduled_action'
@@ -116,12 +142,98 @@ export type DashboardInterventionItem = {
   attempt_count: number | null
   max_attempts: number | null
   failure_reason: string
-  retry_supported: false
-  retry_blocked_reason: 'retry_not_safe'
+  retry_supported: boolean
+  retry_blocked_reason: string | null
   runbook_available: boolean
 }
 
-export type DashboardInterventionListResponse = DashboardInterventionItem[]
+export type ListEnvelope<T> = {
+  items: T[]
+  total: number
+  limit: number
+  offset: number
+  generated_at: string
+}
+
+export type DashboardInterventionListResponse = ListEnvelope<DashboardInterventionItem>
+
+export type IncidentDetailRecord = {
+  id?: number | string | null
+  action_id?: number | null
+  call_attempt_id?: number | null
+  audit_log_id?: number | null
+  scheduled_action_id?: number | null
+  event_id?: string | null
+  state?: string | null
+  status?: string | null
+  display_status?: string | null
+  action?: string | null
+  operation?: string | null
+  result?: string | null
+  message?: string | null
+  failure_reason?: string | null
+  reason?: string | null
+  decision?: string | null
+  operation_state?: string | null
+  level?: string | null
+  component?: string | null
+  attempt_number?: number | null
+  created_at?: string | null
+  updated_at?: string | null
+  activity_at?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+  attempted_at?: string | null
+  decided_at?: string | null
+  requested_at?: string | null
+  detected_at?: string | null
+  source_type?: string | null
+}
+
+export type IncidentDetailResponse = DashboardIncident & {
+  closed_at: string | null
+  duration: string | null
+  trigger_group: string | null
+  operations: IncidentDetailRecord[]
+  actions: IncidentDetailRecord[]
+  call_attempts: IncidentDetailRecord[]
+  approvals: IncidentDetailRecord[]
+  interventions: IncidentDetailRecord[]
+  audit_logs: IncidentDetailRecord[]
+}
+
+export type AuditLogItem = {
+  id: number
+  created_at: string
+  level: string
+  component: string
+  event_id: string | null
+  scheduled_action_id: number | null
+  operation: string | null
+  message: string
+  context: Record<string, unknown> | null
+}
+
+export type AuditLogListResponse = ListEnvelope<AuditLogItem>
+
+export type OperationalConfigurationResponse = {
+  generated_at: string
+  worker: {
+    enabled: boolean
+    running: boolean
+    ready: boolean
+    poll_interval_seconds: number
+    batch_size: number
+    processing_timeout_minutes: number
+    max_attempts: number
+  }
+  runbooks: {
+    available: boolean
+    count: number
+    cache_count: number
+    last_reload: string | null
+  }
+}
 
 export type InterventionRunbookResponse = {
   intervention_id: string

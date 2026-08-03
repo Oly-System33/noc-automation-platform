@@ -44,6 +44,38 @@ def init_db():
             "ADD COLUMN IF NOT EXISTS approval_when VARCHAR"
         ))
         connection.execute(text(
+            "ALTER TABLE scheduled_actions ADD COLUMN IF NOT EXISTS "
+            "approval_requested_at TIMESTAMP WITH TIME ZONE"
+        ))
+        connection.execute(text(
+            "ALTER TABLE scheduled_actions ADD COLUMN IF NOT EXISTS "
+            "approval_decision VARCHAR"
+        ))
+        connection.execute(text(
+            "ALTER TABLE scheduled_actions ADD COLUMN IF NOT EXISTS "
+            "approval_decided_at TIMESTAMP WITH TIME ZONE"
+        ))
+        connection.execute(text(
+            "UPDATE scheduled_actions SET approval_requested_at = created_at "
+            "WHERE execution_mode = 'manual_approval' "
+            "AND approval_requested_at IS NULL"
+        ))
+        connection.execute(text(
+            "UPDATE scheduled_actions SET approval_decision = 'approved', "
+            "approval_decided_at = COALESCE(processing_started_at, executed_at, created_at) "
+            "WHERE execution_mode = 'manual_approval' "
+            "AND state IN ('processing', 'executed', 'failed') "
+            "AND approval_decision IS NULL"
+        ))
+        connection.execute(text(
+            "UPDATE scheduled_actions SET approval_decision = 'rejected', "
+            "approval_decided_at = COALESCE(cancelled_at, created_at) "
+            "WHERE execution_mode = 'manual_approval' "
+            "AND cancel_reason IN "
+            "('operator_rejected', 'incident_not_found', 'incident_not_open') "
+            "AND approval_decision IS NULL"
+        ))
+        connection.execute(text(
             "ALTER TABLE scheduled_actions "
             "ADD COLUMN IF NOT EXISTS pre_actions JSONB"
         ))

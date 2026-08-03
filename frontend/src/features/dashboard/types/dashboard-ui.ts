@@ -73,30 +73,46 @@ export type Incident = {
   status: VisibleStatus
   action: string | null
   time: string
+  openedAt: string
+  closedAt: string
+  duration: string
+  currentAction: string
 }
 
 export type Operation = {
   rowId: string
   scheduledActionId: number
+  eventId: string
   action: string | null
   client: string
   status: VisibleStatus
   target: string
   attempts: string
+  attemptCount: string
+  maxAttempts: string
+  createdAt: string
+  activityAt: string
   control: 'Pausar' | 'Reanudar' | null
 }
 
 export type Approval = {
   scheduledActionId: number
+  eventId: string
   id: string
   client: string
   objective: string
   reason: string
   time: string
+  decision: 'pending' | 'approved' | 'rejected' | 'unknown'
+  result: string | null
+  operationState: string
+  requestedAt: string
+  decidedAt: string
 }
 
 export type ManualIntervention = {
   interventionId: string
+  sourceType: string
   eventId: string
   client: string
   host: string
@@ -105,7 +121,9 @@ export type ManualIntervention = {
   status: VisibleStatus
   time: string
   failureReason: string
+  attempts: string
   retrySupported: boolean
+  retryBlockedReason: string | null
   runbookAvailable: boolean
 }
 

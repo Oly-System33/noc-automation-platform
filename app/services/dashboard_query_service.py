@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -7,6 +8,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.models import (
     ActionRecord,
+    AuditLogRecord,
+    CallAttemptRecord,
     CallFlowRecord,
     EventRecord,
     IncidentRecord,
@@ -16,6 +19,11 @@ from app.db.models import (
 from app.db.session import SessionLocal
 from app.schemas.dashboard import (
     DashboardApprovalListResponse,
+    DashboardApprovalItem,
+    DashboardActionSummary,
+    DashboardAuditSummary,
+    DashboardCallAttemptSummary,
+    DashboardIncidentDetail,
     DashboardIncidentItem,
     DashboardIncidentListResponse,
     DashboardOperationItem,
@@ -24,10 +32,11 @@ from app.schemas.dashboard import (
     DashboardStatus,
     DashboardStatusCounts,
     DashboardSummaryResponse,
+    DashboardInterventionSummary,
     resolve_dashboard_status,
     resolve_operation_status,
 )
-MAX_DASHBOARD_LIMIT = 500
+MAX_DASHBOARD_LIMIT = 100
 MAX_ERROR_LENGTH = 500
 
 logger = logging.getLogger(__name__)
@@ -84,11 +93,18 @@ class DashboardQueryService:
             lambda: datetime.now(timezone.utc)
         )
 
-    def list_incidents(self, limit=100, client=None, status=None):
+    def list_incidents(
+        self, limit=100, offset=0, search=None, client=None, severity=None,
+        status=None, incident_status=None,
+    ):
         limit = max(1, min(int(limit), MAX_DASHBOARD_LIMIT))
+        offset = max(0, int(offset))
         client_filter = str(client).strip().casefold() if client else None
+        severity_filter = str(severity).strip().casefold() if severity else None
+        search_filter = str(search).strip().casefold() if search else None
         status_filter = DashboardStatus(status) if status is not None else None
-        has_filters = client_filter is not None or status_filter is not None
+        incident_filter = str(incident_status).strip().casefold() if incident_status else None
+        has_filters = any((client_filter, severity_filter, search_filter, status_filter, incident_filter)) or offset
         generated_at, items, total = self._load_items(
             limit=None if has_filters else limit,
             include_total=not has_filters,
@@ -106,13 +122,30 @@ class DashboardQueryService:
                 if str(item.client or "").strip().casefold() == client_filter
             ]
 
+        if severity_filter is not None:
+            items = [item for item in items if str(item.severity or "").strip().casefold() == severity_filter]
+
+        if incident_filter is not None:
+            items = [item for item in items if str(item.incident_status or "").strip().casefold() == incident_filter]
+
+        if search_filter is not None:
+            items = [
+                item for item in items
+                if search_filter in " ".join(str(value or "") for value in (
+                    item.event_id, item.client, item.host, item.trigger,
+                    item.severity, item.current_action, item.target,
+                )).casefold()
+            ]
+
         if has_filters:
             total = len(items)
-            items = items[:limit]
+            items = items[offset:offset + limit]
 
         return DashboardIncidentListResponse(
             items=items,
             total=total,
+            limit=limit,
+            offset=offset,
             generated_at=generated_at,
         )
 
@@ -136,16 +169,123 @@ class DashboardQueryService:
             total=len(items),
         )
 
+    def get_incident_detail(self, event_id):
+        event_id = str(event_id).strip()
+        generated_at, incident_items, _ = self._load_items(limit=None, include_total=False)
+        item = next((candidate for candidate in incident_items if candidate.event_id == event_id), None)
+        if item is None:
+            return None
+
+        session = None
+        try:
+            session = self._session_factory()
+            incident = session.query(IncidentRecord).filter(IncidentRecord.event_id == event_id).first()
+            actions = self._query_by_event_ids(session, ActionRecord, [event_id])
+            attempts = self._query_by_event_ids(session, CallAttemptRecord, [event_id])
+            scheduled = self._query_by_event_ids(session, ScheduledActionRecord, [event_id])
+            processed = self._query_by_event_ids(session, ProcessedEventRecord, [event_id])
+            calls = self._query_by_event_ids(session, CallFlowRecord, [event_id])
+            audits = self._query_by_event_ids(session, AuditLogRecord, [event_id])
+
+            operation_response = self.list_operations(
+                limit=100,
+                event_id=event_id,
+            )
+            operations = operation_response.items
+            operations = [operation.model_copy(update={"error_message": self._safe_detail_error(operation.error_message)}) for operation in operations]
+            approvals = [self._approval_from_record(record, generated_at) for record in scheduled if record.execution_mode == "manual_approval"]
+            approvals = [approval for approval in approvals if approval is not None]
+            approvals.sort(key=lambda approval: (self._timestamp(approval.requested_at), approval.scheduled_action_id), reverse=True)
+
+            interventions = []
+            cutoff = generated_at - timedelta(minutes=self.processing_timeout_minutes)
+            for record in scheduled:
+                state = self._normalize_state(record.state)
+                if state == "failed" or (state == "processing" and record.processing_started_at and self._as_utc(record.processing_started_at) <= cutoff):
+                    interventions.append(DashboardInterventionSummary(
+                        intervention_id=f"scheduled_action:{record.id}", source_type="scheduled_action",
+                        status="failed" if state == "failed" else "stuck",
+                        detected_at=self._as_utc(record.processing_started_at or record.created_at),
+                        failure_reason="Scheduled action failed" if state == "failed" else "Processing exceeded the safe timeout",
+                    ))
+            for record in processed:
+                state = self._normalize_state(record.state)
+                if state == "failed" or (state == "processing" and record.processing_started_at and self._as_utc(record.processing_started_at) <= cutoff):
+                    interventions.append(DashboardInterventionSummary(
+                        intervention_id=f"processed_event:{record.id}", source_type="processed_event",
+                        status="failed" if state == "failed" else "stuck",
+                        detected_at=self._as_utc(record.processing_started_at or record.created_at),
+                        failure_reason="Event processing failed" if state == "failed" else "Processing exceeded the safe timeout",
+                    ))
+            for record in calls:
+                if self._normalize_state(record.state) == "manual_required":
+                    interventions.append(DashboardInterventionSummary(
+                        intervention_id=f"call_flow:{record.id}", source_type="call_flow", status="manual_required",
+                        detected_at=self._as_utc(record.manual_required_at or record.updated_at or record.created_at),
+                        failure_reason="Manual call handling required",
+                    ))
+            if self._normalize_state(incident.current_status) != "open":
+                interventions = []
+            interventions.sort(key=lambda value: (value.detected_at, value.intervention_id), reverse=True)
+
+            safe_audits = []
+            for record in sorted(audits, key=lambda value: (self._timestamp(value.created_at), value.id or 0), reverse=True)[:100]:
+                details = record.details if isinstance(record.details, dict) else {}
+                action_id = details.get("scheduled_action_id")
+                safe_audits.append(DashboardAuditSummary(
+                    audit_log_id=record.id, level=record.level, component=record.component,
+                    message=self._safe_public_text(record.message, 500) or "Audit event",
+                    created_at=self._as_utc(record.created_at),
+                    scheduled_action_id=action_id if isinstance(action_id, int) else None,
+                ))
+
+            item_data = item.model_dump()
+            item_data["error_message"] = self._safe_detail_error(item.error_message)
+            return DashboardIncidentDetail(
+                **item_data,
+                trigger_group=incident.trigger_group,
+                operations=operations[:100],
+                actions=[DashboardActionSummary(
+                    action_id=record.id, action=record.action_type,
+                    status=record.status, created_at=self._as_utc_or_none(record.created_at),
+                    error_message=self._safe_detail_error(record.error_message),
+                ) for record in sorted(actions, key=lambda value: (self._timestamp(value.created_at), value.id or 0), reverse=True)[:100]],
+                call_attempts=[DashboardCallAttemptSummary(
+                    call_attempt_id=record.id, attempt_number=record.attempt_number, state=record.state,
+                    started_at=self._as_utc_or_none(record.started_at), answered_at=self._as_utc_or_none(record.answered_at),
+                    completed_at=self._as_utc_or_none(record.completed_at), confirmed_at=self._as_utc_or_none(record.confirmed_at),
+                    error_message=self._safe_detail_error(record.error_message),
+                ) for record in sorted(attempts, key=lambda value: (value.attempt_number, value.id or 0), reverse=True)[:100]],
+                approvals=approvals[:100], interventions=interventions[:100], audit_logs=safe_audits,
+            )
+        except SQLAlchemyError as error:
+            if session is not None:
+                session.rollback()
+            raise DashboardQueryError("dashboard_query_failed") from error
+        finally:
+            if session is not None:
+                session.close()
+
     def list_operations(
         self,
         *,
         limit: int = 100,
+        offset: int = 0,
+        search: str | None = None,
         client: str | None = None,
         status: DashboardOperationStatus | None = None,
+        action: str | None = None,
+        internal_state: str | None = None,
+        event_id: str | None = None,
         active_only: bool = False,
     ) -> DashboardOperationListResponse:
         limit = max(1, min(int(limit), MAX_DASHBOARD_LIMIT))
+        offset = max(0, int(offset))
         client_filter = str(client).strip().casefold() if client else None
+        search_filter = str(search).strip().casefold() if search else None
+        action_filter = str(action).strip().casefold() if action else None
+        state_filter = str(internal_state).strip().casefold() if internal_state else None
+        event_filter = str(event_id).strip() if event_id else None
         status_filter = (
             DashboardOperationStatus(status) if status is not None else None
         )
@@ -171,9 +311,22 @@ class DashboardQueryService:
                 if item.display_status in ACTIVE_OPERATION_STATUSES
             ]
 
+        if action_filter is not None:
+            items = [item for item in items if str(item.action or "").casefold() == action_filter]
+        if state_filter is not None:
+            items = [item for item in items if str(item.internal_state).casefold() == state_filter]
+        if event_filter is not None:
+            items = [item for item in items if item.event_id == event_filter]
+        if search_filter is not None:
+            items = [item for item in items if search_filter in " ".join(
+                str(value or "") for value in (item.event_id, item.client, item.host, item.trigger, item.action, item.target)
+            ).casefold()]
+
         return DashboardOperationListResponse(
-            items=items[:limit],
+            items=items[offset:offset + limit],
             total=len(items),
+            limit=limit,
+            offset=offset,
             generated_at=generated_at,
         )
 
@@ -181,13 +334,16 @@ class DashboardQueryService:
         self,
         *,
         limit: int = 100,
+        offset: int = 0,
+        status: str = "pending",
+        search: str | None = None,
         client: str | None = None,
     ) -> DashboardApprovalListResponse:
         limit = max(1, min(int(limit), MAX_DASHBOARD_LIMIT))
+        offset = max(0, int(offset))
         client_filter = str(client).strip().casefold() if client else None
-        generated_at, items = self._load_operation_items(
-            approval_only=True,
-        )
+        search_filter = str(search).strip().casefold() if search else None
+        generated_at, items = self._load_approval_items()
 
         if client_filter is not None:
             items = [
@@ -195,10 +351,74 @@ class DashboardQueryService:
                 if str(item.client or "").strip().casefold() == client_filter
             ]
 
+        if status == "pending":
+            items = [item for item in items if item.operation_state == "pending_approval"]
+        elif status != "all":
+            items = [item for item in items if item.decision == status]
+        if search_filter is not None:
+            items = [item for item in items if search_filter in " ".join(
+                str(value or "") for value in (item.event_id, item.client, item.action, item.target, item.reason)
+            ).casefold()]
+
         return DashboardApprovalListResponse(
-            items=items[:limit],
+            items=items[offset:offset + limit],
             total=len(items),
+            limit=limit,
+            offset=offset,
             generated_at=generated_at,
+        )
+
+    def _load_approval_items(self):
+        session = None
+        generated_at = self._as_utc(self._now_provider())
+        try:
+            session = self._session_factory()
+            records = session.query(ScheduledActionRecord).filter(
+                ScheduledActionRecord.execution_mode == "manual_approval"
+            ).all()
+            items = []
+            for record in records:
+                if self._normalize_state(record.execution_mode) != "manual_approval":
+                    continue
+                if record.id is None or record.event_id is None:
+                    continue
+                item = self._approval_from_record(record, generated_at)
+                if item is not None:
+                    items.append(item)
+            items.sort(key=lambda item: (self._timestamp(item.requested_at), item.scheduled_action_id), reverse=True)
+            return generated_at, items
+        except SQLAlchemyError as error:
+            if session is not None:
+                session.rollback()
+            raise DashboardQueryError("dashboard_query_failed") from error
+        finally:
+            if session is not None:
+                session.close()
+
+    def _approval_from_record(self, record, generated_at):
+        decision = record.approval_decision
+        if decision not in ("approved", "rejected"):
+            decision = (
+                "pending"
+                if self._normalize_state(record.state) == "pending_approval"
+                else None
+            )
+        try:
+            display_status = resolve_operation_status(
+                state=record.state, processing_started_at=record.processing_started_at,
+                now=generated_at, processing_timeout_minutes=self.processing_timeout_minutes,
+            )
+        except ValueError:
+            return None
+        return DashboardApprovalItem(
+            scheduled_action_id=record.id, event_id=record.event_id, client=record.client,
+            action=self._format_actions(record.actions),
+            target=self._safe_target(record.target),
+            reason=record.approval_when, decision=decision,
+            requested_at=self._as_utc_or_none(record.approval_requested_at or record.created_at),
+            decided_at=self._as_utc_or_none(record.approval_decided_at), operation_state=record.state,
+            result=self._normalize_state(record.state),
+            display_status=display_status, created_at=self._as_utc_or_none(record.created_at),
         )
 
     def _load_operation_items(self, *, approval_only):
@@ -300,7 +520,7 @@ class DashboardQueryService:
                             incident.current_status if incident else None
                         ),
                         action=action,
-                        target=record.target,
+                        target=self._safe_target(record.target),
                         internal_state=record.state,
                         display_status=display_status,
                         scheduled_at=self._as_utc_or_none(
@@ -313,6 +533,10 @@ class DashboardQueryService:
                         resumed_at=self._as_utc_or_none(record.resumed_at),
                         attempt_count=record.attempt_count,
                         created_at=self._as_utc_or_none(record.created_at),
+                        activity_at=self._as_utc_or_none(activity_at),
+                        executed_at=self._as_utc_or_none(record.executed_at),
+                        cancelled_at=self._as_utc_or_none(record.cancelled_at),
+                        max_attempts=self._max_attempts(),
                         pause_reason=record.pause_reason,
                         cancel_reason=record.cancel_reason,
                         error_message=self._safe_error(
@@ -566,9 +790,11 @@ class DashboardQueryService:
                 self._parse_datetime(incident.opened_at)
                 or self._parse_datetime(event.timestamp if event else None)
             ),
+            closed_at=self._parse_datetime(incident.closed_at),
+            duration=incident.duration,
             updated_at=self._as_utc_or_none(incident.updated_at),
             current_action=current_action,
-            target=target,
+            target=self._safe_target(target),
             scheduled_action_id=(
                 scheduled_action.id if scheduled_action else None
             ),
@@ -923,6 +1149,42 @@ class DashboardQueryService:
 
         return value[:MAX_ERROR_LENGTH] or None
 
+    def _safe_detail_error(self, value):
+        safe = self._safe_error(value)
+        return "Operation failed" if safe else None
+
+    def _safe_public_text(self, value, max_length):
+        value = self._safe_error(value)
+        if value is None:
+            return None
+        value = re.sub(
+            r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}",
+            "***",
+            value,
+            flags=re.IGNORECASE,
+        )
+        value = re.sub(r"https?://\S+", "***", value, flags=re.IGNORECASE)
+        value = re.sub(
+            r"(?<!\w)\+?\d[\d\s().-]{6,}\d(?!\w)",
+            "***",
+            value,
+        )
+        return value[:max_length] or None
+
+    def _safe_target(self, value):
+        if not isinstance(value, str):
+            return None
+        value = value.strip()
+        if not value or len(value) > 100:
+            return None
+        if re.search(
+            r"@|https?://|\d{7,}|(?:token|secret|password|phone|email)",
+            value,
+            re.IGNORECASE,
+        ):
+            return None
+        return value if re.fullmatch(r"[\w .:/-]+", value) else None
+
     def _format_actions(self, value):
         if isinstance(value, str):
             return value.strip() or None
@@ -985,6 +1247,13 @@ class DashboardQueryService:
 
     def _normalize_state(self, value):
         return str(value).strip().lower() if value is not None else None
+
+    def _max_attempts(self):
+        try:
+            value = int(os.getenv("SCHEDULED_ACTION_MAX_ATTEMPTS", "3"))
+        except ValueError:
+            return 3
+        return value if value > 0 else 3
 
     def _first_value(self, *values):
         for value in values:

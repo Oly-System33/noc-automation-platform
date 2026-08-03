@@ -36,6 +36,14 @@ class InterventionItem(BaseModel):
     failure_reason: str
 
 
+class InterventionListResponse(BaseModel):
+    items: list[InterventionItem]
+    total: int
+    limit: int
+    offset: int
+    generated_at: datetime
+
+
 class InterventionRunbook(BaseModel):
     intervention_id: str
     source: Literal["persisted_action_plan", "current_runbook"]

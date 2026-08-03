@@ -44,7 +44,7 @@ describe('aplicación', () => {
     expect(
       screen.getByRole('heading', { name: 'Incidentes' }),
     ).toBeInTheDocument()
-    expect(screen.getByText('Pantalla temporal.')).toBeInTheDocument()
+    expect(screen.getByRole('table', { name: 'Incidentes' })).toBeInTheDocument()
   })
 
   it('inicializa el provider de TanStack Query', () => {

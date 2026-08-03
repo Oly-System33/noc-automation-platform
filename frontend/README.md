@@ -83,3 +83,23 @@ puede reintentar efectos externos de forma idempotente, por lo que retry respond
 Cada panel conserva datos anteriores durante polling y presenta estados propios
 de carga, vacío y error. Los conflictos `404/409` se traducen a mensajes
 controlados sin mostrar bodies internos.
+
+## Pantallas operativas F5
+
+La aplicación usa un layout compartido con sidebar para estas rutas:
+
+- `/incidentes` ofrece búsqueda, filtros y paginación desde FastAPI.
+- `/incidentes/:eventId` muestra el detalle seguro y sus registros relacionados.
+- `/operaciones` incluye vistas activas, pausadas, fallidas e intervenciones.
+- `/aprobaciones` separa pendientes, aprobadas, rechazadas y todas.
+- `/auditoria` consulta registros paginados de solo lectura.
+- `/configuracion` muestra salud y configuración operativa no sensible.
+
+Los filtros y el offset se reflejan en query parameters. Las páginas completas
+no usan polling agresivo, conservan la página anterior durante la consulta y
+permiten reintentar errores. Pausa, reanudación, aprobación, rechazo, runbook y
+retry reutilizan las queries, mutations y restricciones de F4. El retry externo
+continúa bloqueado mientras el backend reporte `retry_supported=false`.
+
+La configuración no permite editar variables ni recargar runbooks. Auditoría
+solo presenta contexto allowlisted; no muestra el JSON original almacenado.

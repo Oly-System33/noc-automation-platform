@@ -25,7 +25,9 @@ export function OperationsTable(props: OperationsTableProps) {
   return (
     <DashboardPanel
       title="Operaciones activas"
+      href="/operaciones"
       footer="Ver historial de operaciones"
+      footerHref="/operaciones"
       isRefreshing={props.isFetching && !props.isLoading}
       hasError={props.isError && props.hasResponse}
       onRetry={props.onRetry}

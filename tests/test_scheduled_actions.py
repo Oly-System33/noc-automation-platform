@@ -320,6 +320,8 @@ class ScheduledActionPersistenceTest(unittest.TestCase):
         changes = query.update.call_args.args[0]
         self.assertEqual(changes["state"], "processing")
         self.assertEqual(changes["processing_started_at"], NOW)
+        self.assertEqual(changes["approval_decision"], "approved")
+        self.assertEqual(changes["approval_decided_at"], NOW)
         self.assertIn("pending_approval", expression_values(query))
         audit = session.add.call_args.args[0]
         self.assertIsInstance(audit, AuditLogRecord)
@@ -405,6 +407,8 @@ class ScheduledActionPersistenceTest(unittest.TestCase):
         changes = query.update.call_args.args[0]
         self.assertEqual(changes["state"], "cancelled")
         self.assertEqual(changes["cancel_reason"], "incident_not_open")
+        self.assertEqual(changes["approval_decision"], "rejected")
+        self.assertEqual(changes["approval_decided_at"], NOW)
         audit = session.add.call_args.args[0]
         self.assertEqual(
             audit.message,
@@ -473,6 +477,8 @@ class ScheduledActionPersistenceTest(unittest.TestCase):
         self.assertEqual(record.cancelled_at, NOW)
         self.assertEqual(record.cancel_reason, "operator_rejected")
         self.assertIsNone(record.processing_started_at)
+        self.assertEqual(record.approval_decision, "rejected")
+        self.assertEqual(record.approval_decided_at, NOW)
         query.with_for_update.assert_called_once_with()
         session.begin.assert_called_once_with()
         audit = session.add.call_args.args[0]

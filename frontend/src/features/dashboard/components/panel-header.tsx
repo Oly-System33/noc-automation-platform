@@ -1,6 +1,7 @@
 import { AlertCircle, ChevronRight, RefreshCw } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { AppLink } from '@/components/app-link'
 
 type PanelHeaderProps = {
   title: string
@@ -9,6 +10,7 @@ type PanelHeaderProps = {
   isRefreshing?: boolean
   hasError?: boolean
   onRetry?: () => void
+  href: string
 }
 
 export function PanelHeader({
@@ -18,6 +20,7 @@ export function PanelHeader({
   isRefreshing = false,
   hasError = false,
   onRetry,
+  href,
 }: PanelHeaderProps) {
   return (
     <header className="flex h-8 shrink-0 items-center justify-between border-b border-border-subtle px-3">
@@ -59,13 +62,15 @@ export function PanelHeader({
           </Button>
         )}
         <Button
-          type="button"
+          asChild
           variant="outline"
           size="xs"
           className="h-6 rounded-[3px] border-border bg-transparent px-2 text-[10px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
         >
-          {actionLabel}
-          <ChevronRight aria-hidden="true" className="size-3" />
+          <AppLink href={href}>
+            {actionLabel}
+            <ChevronRight aria-hidden="true" className="size-3" />
+          </AppLink>
         </Button>
       </div>
     </header>

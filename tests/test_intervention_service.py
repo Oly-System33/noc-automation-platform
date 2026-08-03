@@ -202,15 +202,17 @@ class InterventionServiceTest(unittest.TestCase):
         result = service.list_interventions(limit=3)
 
         self.assertEqual(
-            [item.intervention_id for item in result],
+            [item.intervention_id for item in result.items],
             ["call_flow:4", "processed_event:6", "scheduled_action:9"],
         )
         self.assertEqual(
-            [item.status.value for item in result],
+            [item.status.value for item in result.items],
             ["manual_required", "failed", "failed"],
         )
-        self.assertTrue(all(item.retry_supported is False for item in result))
-        serialized = json.dumps([item.model_dump(mode="json") for item in result])
+        self.assertTrue(all(item.retry_supported is False for item in result.items))
+        serialized = json.dumps([item.model_dump(mode="json") for item in result.items])
+        self.assertEqual(result.total, 4)
+        self.assertEqual(result.offset, 0)
         self.assertNotIn("hunter2", serialized)
         self.assertNotIn("15551234567", serialized)
         self.assertNotIn("contacts_payload", serialized)

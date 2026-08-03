@@ -15,6 +15,7 @@ from app.db.session import SessionLocal
 from app.rules.rule_loader import rule_loader
 from app.schemas.interventions import (
     InterventionItem,
+    InterventionListResponse,
     InterventionRunbook,
     InterventionSourceType,
     InterventionStatus,
@@ -54,7 +55,9 @@ class InterventionService:
         self.processing_timeout_minutes = processing_timeout_minutes
         self._now_provider = now_provider or (lambda: datetime.now(timezone.utc))
 
-    def list_interventions(self, limit=100):
+    def list_interventions(self, limit=100, offset=0, search=None, source_type=None, status=None):
+        limit = max(1, min(int(limit), 100))
+        offset = max(0, int(offset))
         now = self._as_utc(self._now_provider())
         cutoff = now - timedelta(minutes=self.processing_timeout_minutes)
         session = self._session_factory()
@@ -71,7 +74,6 @@ class InterventionService:
                     IncidentRecord.current_status == "open",
                 )
                 .order_by(CallFlowRecord.id.desc())
-                .limit(limit)
                 .all()
             )
             scheduled_actions = (
@@ -86,7 +88,6 @@ class InterventionService:
                     )
                 )
                 .order_by(ScheduledActionRecord.id.desc())
-                .limit(limit)
                 .all()
             )
             processed_events = (
@@ -101,7 +102,6 @@ class InterventionService:
                     )
                 )
                 .order_by(ProcessedEventRecord.id.desc())
-                .limit(limit)
                 .all()
             )
 
@@ -132,7 +132,19 @@ class InterventionService:
                 key=lambda item: (item.detected_at, item.intervention_id),
                 reverse=True,
             )
-            return items[:limit]
+            if source_type is not None:
+                items = [item for item in items if item.source_type == source_type]
+            if status is not None:
+                items = [item for item in items if item.status == status]
+            if search:
+                needle = str(search).strip().casefold()
+                items = [item for item in items if needle in " ".join(
+                    str(value or "") for value in (item.intervention_id, item.event_id, item.client, item.host, item.description, item.severity, item.failure_reason)
+                ).casefold()]
+            return InterventionListResponse(
+                items=items[offset:offset + limit], total=len(items), limit=limit,
+                offset=offset, generated_at=now,
+            )
         except SQLAlchemyError as error:
             session.rollback()
             raise InterventionDataError() from error

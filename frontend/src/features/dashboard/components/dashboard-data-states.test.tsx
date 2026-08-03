@@ -18,6 +18,10 @@ const unknownIncident: Incident = {
   status: 'DESCONOCIDO',
   action: null,
   time: '—',
+  openedAt: '—',
+  closedAt: '—',
+  duration: '—',
+  currentAction: '—',
 }
 
 describe('estados de datos del dashboard', () => {

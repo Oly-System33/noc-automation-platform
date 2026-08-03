@@ -163,10 +163,13 @@ ngrok http 8000
 GET  /health
 GET  /api/dashboard/summary
 GET  /api/incidents
+GET  /api/incidents/{event_id}
 GET  /api/operations
 GET  /api/approvals
 GET  /api/interventions
 GET  /api/interventions/{intervention_id}/runbook
+GET  /api/audit-logs
+GET  /api/configuration/operational
 
 POST /api/scheduled-actions/{scheduled_action_id}/pause
 POST /api/scheduled-actions/{scheduled_action_id}/resume
@@ -174,6 +177,13 @@ POST /api/scheduled-actions/{scheduled_action_id}/approve
 POST /api/scheduled-actions/{scheduled_action_id}/reject
 POST /api/interventions/{intervention_id}/retry
 ```
+
+Operational lists accept bounded `limit` and `offset` pagination plus their
+documented filters. Incident detail and audit responses use explicit safe
+projections and never return raw event payloads, integration responses, contact
+data, phone numbers, credentials, or raw audit detail objects. Approval history
+uses persisted decision metadata on `scheduled_actions`; ambiguous legacy
+cancellations remain undecided rather than being inferred.
 
 Relevant scheduled action transitions are:
 

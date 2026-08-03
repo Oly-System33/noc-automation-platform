@@ -1,4 +1,5 @@
 import { Ellipsis } from 'lucide-react'
+import { AppLink } from '@/components/app-link'
 
 import { Button } from '@/components/ui/button'
 import { ActionChannel } from '@/features/dashboard/components/action-channel'
@@ -47,6 +48,7 @@ export function IncidentsTable({
   return (
     <DashboardPanel
       title="Incidentes recientes"
+      href="/incidentes"
       isRefreshing={isFetching && !isLoading}
       hasError={isError && hasResponse}
       onRetry={onRetry}
@@ -107,7 +109,7 @@ export function IncidentsTable({
                   title={incident.fullId}
                   aria-label={`Incidente ${incident.fullId}`}
                 >
-                  {incident.id}
+                  <AppLink className="hover:text-text-primary hover:underline" href={`/incidentes/${encodeURIComponent(incident.fullId)}`}>{incident.id}</AppLink>
                 </td>
                 <td className="px-2 whitespace-nowrap">{incident.client}</td>
                 <td className="px-2 whitespace-nowrap">{incident.host}</td>

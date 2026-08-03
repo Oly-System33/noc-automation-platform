@@ -187,3 +187,16 @@ reference. `docs/ui/noc-logo-reference.png` is the mandatory definitive logo.
 Do not change the dashboard distribution without an explicit task, improvise
 color palettes, create a light mode, or add dependencies without a concrete
 need. Keep internal workflow states separate from dashboard-visible labels.
+
+## Operational pages
+
+Full incident, operation, approval, intervention, and audit lists use bounded
+backend pagination. Query keys must include filters and offsets, while scheduled
+action mutations must invalidate both incident lists and incident details.
+
+Approval decisions are persisted on `scheduled_actions`; do not reconstruct
+ambiguous decisions from UI state. Audit APIs must expose only explicitly
+allowlisted context and must never serialize raw `audit_logs.details`. The
+operational configuration API is read-only and must not instantiate integration
+handlers or expose environment secrets, paths, contact data, callback URLs, or
+database connection values.

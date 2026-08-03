@@ -12,12 +12,27 @@ import type {
   DashboardOperationListResponse,
   DashboardSummaryResponse,
   HealthResponse,
+  IncidentDetailResponse,
+  AuditLogListResponse,
+  OperationalConfigurationResponse,
   InterventionRunbookResponse,
   PauseScheduledActionResponse,
   RejectScheduledActionResponse,
   ResumeScheduledActionResponse,
   RetryInterventionResponse,
 } from './dashboard-api.types'
+import type {
+  ApprovalFilters,
+  AuditFilters,
+  IncidentFilters,
+  InterventionFilters,
+  OperationFilters,
+} from './dashboard-query-keys'
+
+function value(value?: string) {
+  const trimmed = value?.trim()
+  return trimmed || undefined
+}
 
 function isUnavailableHealthResponse(value: unknown): value is HealthResponse {
   if (typeof value !== 'object' || value === null) {
@@ -60,6 +75,21 @@ export function getRecentIncidents({ limit, signal }: RecentIncidentsOptions) {
   })
 }
 
+export function getIncidents(filters: IncidentFilters, signal?: AbortSignal) {
+  return getJson<DashboardIncidentListResponse>('/api/incidents', {
+    signal,
+    query: {
+      limit: filters.limit, offset: filters.offset, search: value(filters.search),
+      client: value(filters.client), severity: value(filters.severity),
+      status: value(filters.status), incident_status: value(filters.incidentStatus),
+    },
+  })
+}
+
+export function getIncidentDetail(eventId: string, signal?: AbortSignal) {
+  return getJson<IncidentDetailResponse>(`/api/incidents/${encodeURIComponent(eventId)}`, { signal })
+}
+
 type ListOptions = {
   limit: number
   signal?: AbortSignal
@@ -92,6 +122,40 @@ export function getDashboardInterventions({ limit, signal }: ListOptions) {
     signal,
     query: { limit },
   })
+}
+
+export function getOperations(filters: OperationFilters, signal?: AbortSignal) {
+  return getJson<DashboardOperationListResponse>('/api/operations', { signal, query: {
+    limit: filters.limit, offset: filters.offset, search: value(filters.search),
+    client: value(filters.client), status: value(filters.status), action: value(filters.action),
+    internal_state: value(filters.internalState), active_only: filters.activeOnly,
+  } })
+}
+
+export function getApprovals(filters: ApprovalFilters, signal?: AbortSignal) {
+  return getJson<DashboardApprovalListResponse>('/api/approvals', { signal, query: {
+    status: filters.status, limit: filters.limit, offset: filters.offset,
+    search: value(filters.search), client: value(filters.client),
+  } })
+}
+
+export function getInterventions(filters: InterventionFilters, signal?: AbortSignal) {
+  return getJson<DashboardInterventionListResponse>('/api/interventions', { signal, query: {
+    limit: filters.limit, offset: filters.offset, search: value(filters.search),
+    source_type: value(filters.sourceType), status: value(filters.status),
+  } })
+}
+
+export function getAuditLogs(filters: AuditFilters, signal?: AbortSignal) {
+  return getJson<AuditLogListResponse>('/api/audit-logs', { signal, query: {
+    limit: filters.limit, offset: filters.offset, search: value(filters.search),
+    level: value(filters.level), component: value(filters.component), event_id: value(filters.eventId),
+    created_from: value(filters.createdFrom), created_to: value(filters.createdTo),
+  } })
+}
+
+export function getOperationalConfiguration(signal?: AbortSignal) {
+  return getJson<OperationalConfigurationResponse>('/api/configuration/operational', { signal })
 }
 
 export function getInterventionRunbook(

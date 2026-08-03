@@ -10,8 +10,16 @@ import {
   getHealth,
   getInterventionRunbook,
   getRecentIncidents,
+  getApprovals,
+  getAuditLogs,
+  getIncidentDetail,
+  getIncidents,
+  getInterventions,
+  getOperationalConfiguration,
+  getOperations,
 } from './dashboard-api'
 import { dashboardQueryKeys } from './dashboard-query-keys'
+import type { ApprovalFilters, AuditFilters, IncidentFilters, InterventionFilters, OperationFilters } from './dashboard-query-keys'
 
 const pollingOptions = {
   refetchInterval: env.pollIntervalMs,
@@ -76,4 +84,34 @@ export function useInterventionRunbookQuery(
     queryFn: ({ signal }) => getInterventionRunbook(interventionId, signal),
     enabled,
   })
+}
+
+const pageOptions = { placeholderData: keepPreviousData } as const
+
+export function useIncidentsQuery(filters: IncidentFilters) {
+  return useQuery({ queryKey: dashboardQueryKeys.incidentList(filters), queryFn: ({ signal }) => getIncidents(filters, signal), ...pageOptions })
+}
+
+export function useIncidentDetailQuery(eventId: string) {
+  return useQuery({ queryKey: dashboardQueryKeys.incidentDetail(eventId), queryFn: ({ signal }) => getIncidentDetail(eventId, signal), enabled: eventId.length > 0 })
+}
+
+export function useOperationsQuery(filters: OperationFilters, enabled = true) {
+  return useQuery({ queryKey: dashboardQueryKeys.operationList(filters), queryFn: ({ signal }) => getOperations(filters, signal), enabled, ...pageOptions })
+}
+
+export function useApprovalsQuery(filters: ApprovalFilters) {
+  return useQuery({ queryKey: dashboardQueryKeys.approvalList(filters), queryFn: ({ signal }) => getApprovals(filters, signal), ...pageOptions })
+}
+
+export function useInterventionsQuery(filters: InterventionFilters, enabled = true) {
+  return useQuery({ queryKey: dashboardQueryKeys.interventionList(filters), queryFn: ({ signal }) => getInterventions(filters, signal), enabled, ...pageOptions })
+}
+
+export function useAuditLogsQuery(filters: AuditFilters) {
+  return useQuery({ queryKey: dashboardQueryKeys.auditList(filters), queryFn: ({ signal }) => getAuditLogs(filters, signal), ...pageOptions })
+}
+
+export function useOperationalConfigurationQuery() {
+  return useQuery({ queryKey: dashboardQueryKeys.configuration(), queryFn: ({ signal }) => getOperationalConfiguration(signal) })
 }

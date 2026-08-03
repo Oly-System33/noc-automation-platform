@@ -223,7 +223,7 @@ describe('Dashboard principal integrado', () => {
     expect(paths.filter((path) => path === '/api/interventions')).toHaveLength(2)
   })
 
-  it('mantiene la navegación básica hacia los placeholders', async () => {
+  it('navega hacia la lista real de incidentes', async () => {
     const user = userEvent.setup()
     renderDashboard()
 
@@ -232,6 +232,6 @@ describe('Dashboard principal integrado', () => {
     expect(
       screen.getByRole('heading', { name: 'Incidentes' }),
     ).toBeInTheDocument()
-    expect(screen.getByText('Pantalla temporal.')).toBeInTheDocument()
+    expect(screen.getByRole('table', { name: 'Incidentes' })).toBeInTheDocument()
   })
 })

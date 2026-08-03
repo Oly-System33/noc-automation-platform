@@ -716,6 +716,7 @@ class PersistenceService:
         )
 
         try:
+            requested_at = self._now() if state == "pending_approval" else None
             record = ScheduledActionRecord(
                 event_id=getattr(event, "event_id", None),
                 client=client,
@@ -729,6 +730,7 @@ class PersistenceService:
                 contacts_payload=self._safe_value(contacts_payload),
                 execution_mode=execution_mode,
                 approval_when=approval_when,
+                approval_requested_at=requested_at,
                 pre_actions=self._safe_value(pre_actions),
                 pre_target=pre_target,
                 scheduled_at=scheduled_at,
@@ -837,6 +839,9 @@ class PersistenceService:
             "contacts_payload": record.contacts_payload,
             "execution_mode": record.execution_mode,
             "approval_when": record.approval_when,
+            "approval_requested_at": record.approval_requested_at,
+            "approval_decision": record.approval_decision,
+            "approval_decided_at": record.approval_decided_at,
             "pre_actions": record.pre_actions,
             "pre_target": record.pre_target,
             "scheduled_at": record.scheduled_at,
@@ -1229,6 +1234,8 @@ class PersistenceService:
                         "cancelled_at": now,
                         "cancel_reason": reason,
                         "processing_started_at": None,
+                        "approval_decision": "rejected",
+                        "approval_decided_at": now,
                     })
                 )
 
@@ -1276,6 +1283,8 @@ class PersistenceService:
                     "state": "processing",
                     "processing_started_at": now,
                     "attempt_count": ScheduledActionRecord.attempt_count + 1,
+                    "approval_decision": "approved",
+                    "approval_decided_at": now,
                 })
             )
 
@@ -1374,6 +1383,8 @@ class PersistenceService:
                 record.cancelled_at = now
                 record.cancel_reason = "operator_rejected"
                 record.processing_started_at = None
+                record.approval_decision = "rejected"
+                record.approval_decided_at = now
                 self._add_audit_log(
                     session,
                     event_id=record.event_id,

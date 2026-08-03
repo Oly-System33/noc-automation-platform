@@ -20,7 +20,7 @@ export function ApprovalsTable(props: ApprovalsTableProps) {
   const showError = props.isError && !props.hasResponse
   const showEmpty = props.hasResponse && props.approvals.length === 0
 
-  return <DashboardPanel title="Aprobaciones pendientes" footer="Ver todas las aprobaciones" isRefreshing={props.isFetching && !props.isLoading} hasError={props.isError && props.hasResponse} onRetry={props.onRetry}>
+  return <DashboardPanel title="Aprobaciones pendientes" href="/aprobaciones?status=pending" footer="Ver todas las aprobaciones" footerHref="/aprobaciones?status=pending" isRefreshing={props.isFetching && !props.isLoading} hasError={props.isError && props.hasResponse} onRetry={props.onRetry}>
     <div className="noc-scrollbar min-h-0 flex-1 overflow-auto"><table aria-label="Aprobaciones pendientes" className="w-full min-w-[510px] table-fixed text-left text-[10px]">
       <thead className="text-text-muted"><tr className="h-6 border-b border-border-subtle"><th scope="col" className="w-[13%] px-3 font-normal">ID</th><th scope="col" className="w-[12%] px-2 font-normal">Cliente</th><th scope="col" className="w-[24%] px-2 font-normal">Objetivo / Acción</th><th scope="col" className="w-[20%] px-2 font-normal">Razón</th><th scope="col" className="w-[7%] px-2 font-normal">Tiempo</th><th scope="col" className="w-[24%] px-2 font-normal">Acciones</th></tr></thead>
       <tbody className="text-text-secondary">

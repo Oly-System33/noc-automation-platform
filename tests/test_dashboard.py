@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from app.schemas.dashboard import (
     DashboardApprovalListResponse,
+    DashboardApprovalItem,
     DashboardIncidentItem,
     DashboardIncidentListResponse,
     DashboardOperationItem,
@@ -451,7 +452,13 @@ class DashboardOperationStatusResolverTest(unittest.TestCase):
             generated_at=NOW,
         )
         approval_response = DashboardApprovalListResponse(
-            items=[item],
+            items=[DashboardApprovalItem(
+                scheduled_action_id=42,
+                event_id="event-1",
+                action="jira",
+                operation_state="pending_approval",
+                display_status=DashboardOperationStatus.PENDING_APPROVAL,
+            )],
             total=1,
             generated_at=NOW,
         )

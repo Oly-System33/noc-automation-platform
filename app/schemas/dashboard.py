@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -185,6 +186,8 @@ class DashboardIncidentItem(BaseModel):
     incident_status: str | None = None
     display_status: DashboardStatus
     opened_at: datetime | None = None
+    closed_at: datetime | None = None
+    duration: str | None = None
     updated_at: datetime | None = None
     current_action: str | None = None
     target: str | None = None
@@ -217,6 +220,10 @@ class DashboardOperationItem(BaseModel):
     resumed_at: datetime | None = None
     attempt_count: int | None = None
     created_at: datetime | None = None
+    activity_at: datetime | None = None
+    executed_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    max_attempts: int | None = None
     pause_reason: str | None = None
     cancel_reason: str | None = None
     error_message: str | None = None
@@ -247,16 +254,88 @@ class DashboardSummaryResponse(BaseModel):
 class DashboardIncidentListResponse(BaseModel):
     items: list[DashboardIncidentItem]
     total: int
+    limit: int = 100
+    offset: int = 0
     generated_at: datetime
 
 
 class DashboardOperationListResponse(BaseModel):
     items: list[DashboardOperationItem]
     total: int
+    limit: int = 100
+    offset: int = 0
     generated_at: datetime
+
+
+class DashboardApprovalItem(BaseModel):
+    scheduled_action_id: int
+    event_id: str
+    client: str | None = None
+    action: str | None = None
+    target: str | None = None
+    reason: str | None = None
+    decision: Literal["pending", "approved", "rejected"] | None = "pending"
+    requested_at: datetime | None = None
+    decided_at: datetime | None = None
+    operation_state: str
+    result: str | None = None
+    display_status: DashboardOperationStatus
+    created_at: datetime | None = None
 
 
 class DashboardApprovalListResponse(BaseModel):
-    items: list[DashboardOperationItem]
+    items: list[DashboardApprovalItem]
     total: int
+    limit: int = 100
+    offset: int = 0
     generated_at: datetime
+
+
+class DashboardActionSummary(BaseModel):
+    action_id: int
+    action: str
+    status: str
+    created_at: datetime | None = None
+    error_message: str | None = None
+
+
+class DashboardCallAttemptSummary(BaseModel):
+    call_attempt_id: int
+    attempt_number: int
+    state: str
+    started_at: datetime | None = None
+    answered_at: datetime | None = None
+    completed_at: datetime | None = None
+    confirmed_at: datetime | None = None
+    error_message: str | None = None
+
+
+class DashboardInterventionSummary(BaseModel):
+    intervention_id: str
+    source_type: str
+    status: str
+    detected_at: datetime
+    failure_reason: str
+
+
+class DashboardAuditSummary(BaseModel):
+    audit_log_id: int
+    level: str
+    component: str
+    message: str
+    created_at: datetime
+    scheduled_action_id: int | None = None
+
+
+class DashboardIncidentDetail(DashboardIncidentItem):
+    trigger_group: str | None = None
+    operations: list[DashboardOperationItem]
+    actions: list[DashboardActionSummary]
+    call_attempts: list[DashboardCallAttemptSummary]
+    approvals: list[DashboardApprovalItem]
+    interventions: list[DashboardInterventionSummary]
+    audit_logs: list[DashboardAuditSummary]
+
+
+class DashboardErrorResponse(BaseModel):
+    detail: str

@@ -48,6 +48,7 @@ const operationRefreshKeys = [
   dashboardQueryKeys.operationLists(),
   dashboardQueryKeys.summary(),
   dashboardQueryKeys.incidentLists(),
+  dashboardQueryKeys.incidentDetails(),
   dashboardQueryKeys.interventionLists(),
 ]
 
@@ -121,6 +122,7 @@ describe('mutaciones del dashboard', () => {
       dashboardQueryKeys.interventionLists(),
       dashboardQueryKeys.operationLists(),
       dashboardQueryKeys.incidentLists(),
+      dashboardQueryKeys.incidentDetails(),
       dashboardQueryKeys.summary(),
     ])
     expect(invalidatedKeys(client)).not.toContainEqual(dashboardQueryKeys.health())

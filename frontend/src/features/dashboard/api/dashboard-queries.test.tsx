@@ -132,6 +132,8 @@ describe('queries del dashboard', () => {
     const firstPage = {
       items: [],
       total: 6,
+      limit: 6,
+      offset: 0,
       generated_at: '2026-08-03T12:00:00Z',
     }
     vi.mocked(getRecentIncidents).mockImplementation(({ limit }) => {
@@ -178,10 +180,10 @@ describe('queries del dashboard', () => {
   })
 
   it('aplica polling, señales y límites predeterminados a las listas F4', async () => {
-    const response = { items: [], total: 0, generated_at: '2026-08-03T12:00:00Z' }
+    const response = { items: [], total: 0, limit: 3, offset: 0, generated_at: '2026-08-03T12:00:00Z' }
     vi.mocked(getDashboardOperations).mockResolvedValue(response)
     vi.mocked(getDashboardApprovals).mockResolvedValue(response)
-    vi.mocked(getDashboardInterventions).mockResolvedValue([])
+    vi.mocked(getDashboardInterventions).mockResolvedValue(response)
     const contexts = [createWrapper(), createWrapper(), createWrapper()]
 
     renderHook(() => useDashboardOperationsQuery(), { wrapper: contexts[0].Wrapper })

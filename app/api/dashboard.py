@@ -1,11 +1,13 @@
 import logging
-from typing import Annotated, Callable
+from typing import Annotated, Callable, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas.dashboard import (
     DashboardApprovalListResponse,
+    DashboardErrorResponse,
     DashboardIncidentListResponse,
+    DashboardIncidentDetail,
     DashboardOperationListResponse,
     DashboardOperationStatus,
     DashboardStatus,
@@ -37,8 +39,8 @@ approvals_router = APIRouter(
 )
 
 ERROR_RESPONSES = {
-    503: {"description": "Dashboard data is temporarily unavailable"},
-    500: {"description": "Unexpected internal error"},
+    503: {"model": DashboardErrorResponse, "description": "Dashboard data is temporarily unavailable"},
+    500: {"model": DashboardErrorResponse, "description": "Unexpected internal error"},
 }
 
 
@@ -91,28 +93,47 @@ def list_dashboard_incidents(
         int,
         Query(
             ge=1,
-            le=500,
+            le=100,
             description="Maximum number of incidents to return.",
         ),
     ] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    search: Annotated[str | None, Query(max_length=200)] = None,
     client: Annotated[
         str | None,
         Query(
             description="Exact client name, matched case-insensitively.",
         ),
     ] = None,
+    severity: Annotated[str | None, Query(max_length=100)] = None,
     status: Annotated[
         DashboardStatus | None,
         Query(description="Visible dashboard status."),
     ] = None,
+    incident_status: Annotated[Literal["open", "closed"] | None, Query()] = None,
 ):
     return _execute_query(
         lambda: dashboard_query_service.list_incidents(
             limit=limit,
+            offset=offset,
+            search=search,
             client=client,
+            severity=severity,
             status=status,
+            incident_status=incident_status,
         )
     )
+
+
+@incidents_router.get(
+    "/{event_id}", response_model=DashboardIncidentDetail,
+    summary="Get incident detail", responses={**ERROR_RESPONSES, 404: {"model": DashboardErrorResponse, "description": "Incident not found"}},
+)
+def get_dashboard_incident(event_id: str):
+    result = _execute_query(lambda: dashboard_query_service.get_incident_detail(event_id))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return result
 
 
 @operations_router.get(
@@ -130,16 +151,20 @@ def list_dashboard_operations(
         int,
         Query(
             ge=1,
-            le=500,
+            le=100,
             description="Maximum number of operations to return.",
         ),
     ] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    search: Annotated[str | None, Query(max_length=200)] = None,
     client: Annotated[
         str | None,
         Query(
             description="Exact client name, matched case-insensitively.",
         ),
     ] = None,
+    action: Annotated[str | None, Query(max_length=100)] = None,
+    internal_state: Annotated[Literal["pending", "pending_approval", "paused", "processing", "executed", "failed", "cancelled"] | None, Query()] = None,
     status: Annotated[
         DashboardOperationStatus | None,
         Query(description="Visible operation status."),
@@ -157,8 +182,12 @@ def list_dashboard_operations(
     return _execute_query(
         lambda: dashboard_query_service.list_operations(
             limit=limit,
+            offset=offset,
+            search=search,
             client=client,
             status=status,
+            action=action,
+            internal_state=internal_state,
             active_only=active_only,
         ),
         unexpected_detail="Unable to retrieve dashboard data",
@@ -180,10 +209,13 @@ def list_dashboard_approvals(
         int,
         Query(
             ge=1,
-            le=500,
+            le=100,
             description="Maximum number of approvals to return.",
         ),
     ] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    status: Annotated[Literal["pending", "approved", "rejected", "all"], Query()] = "pending",
+    search: Annotated[str | None, Query(max_length=200)] = None,
     client: Annotated[
         str | None,
         Query(
@@ -194,6 +226,9 @@ def list_dashboard_approvals(
     return _execute_query(
         lambda: dashboard_query_service.list_approvals(
             limit=limit,
+            offset=offset,
+            status=status,
+            search=search,
             client=client,
         ),
         unexpected_detail="Unable to retrieve dashboard data",
